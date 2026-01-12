@@ -17,13 +17,13 @@ export default async function handler(req: any, res: any) {
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // 1. PROTOCOLO DE PESQUISA E CONTEXTO (USANDO FLASH LITE PARA ALTA DISPONIBILIDADE)
+    // 1. PROTOCOLO DE PESQUISA E CONTEXTO (USANDO GEMINI 3 FLASH PARA GROUNDING)
     const researchResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-latest',
+      model: 'gemini-3-flash-preview',
       contents: "Identifique as 3 tendências de tecnologia e marketing digital mais importantes de hoje no Brasil. Seja direto e traga fatos reais.",
       config: {
         tools: [{ googleSearch: {} }],
-        thinkingConfig: { thinkingBudget: 0 } // Otimização de cota
+        thinkingConfig: { thinkingBudget: 0 } // Eficiência máxima
       }
     });
 
@@ -32,11 +32,11 @@ export default async function handler(req: any, res: any) {
 
     // 2. GERAÇÃO EDITORIAL PREMIUM (CONSOLIDADA)
     const generationResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-latest',
+      model: 'gemini-3-flash-preview',
       contents: `Contexto: ${trendsContext}. Gere 3 artigos PREMIUM para o blog CMBDIGITAL. 
       Siga o PROTOCOLO: tom chic, técnico, autoritativo. Formate em JSON para o banco de rascunhos.`,
       config: {
-        systemInstruction: "Você é um Motor Editorial de Elite. Gere conteúdo de alta autoridade, sem clichês de IA. Retorne estritamente um array JSON de objetos.",
+        systemInstruction: "Você é um Motor Editorial de Elite. Gere conteúdo de alta autoridade, sem clichês de IA. Retorne estritamente um array JSON de objetos seguindo o schema fornecido.",
         responseMimeType: "application/json",
         thinkingConfig: { thinkingBudget: 0 },
         responseSchema: {
@@ -71,8 +71,7 @@ export default async function handler(req: any, res: any) {
           model: 'gemini-2.5-flash-image',
           contents: {
             parts: [{ text: art.promptImagem || `High-end minimalist tech photography for: "${art.title}". 8k, obsidian style.` }]
-          },
-          config: { thinkingConfig: { thinkingBudget: 0 } }
+          }
         });
 
         let imageUrl = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200";
