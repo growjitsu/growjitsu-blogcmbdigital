@@ -5,18 +5,22 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
-  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  // AÇÃO OBRIGATÓRIA: Uso exclusivo de process.env.GEMINI_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no ambiente do servidor.' });
+    return res.status(500).json({ 
+      error: 'GEMINI_API_KEY não configurada no ambiente do servidor' 
+    });
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
 
     // 1. PESQUISA DE TENDÊNCIAS (GROUNDING)
+    // Usando gemini-3-flash-preview para maior estabilidade de cota e performance
     const researchResponse = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: "Identifique as 3 notícias ou tendências de tecnologia, IA e marketing digital mais importantes de hoje (foco no Brasil). Seja específico.",
       config: {
         tools: [{ googleSearch: {} }]
@@ -27,7 +31,7 @@ export default async function handler(req: any, res: any) {
 
     // 2. GERAÇÃO DE ARTIGOS
     const generationResponse = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: `Com base nestas tendências: "${researchResponse.text}", crie exatamente 3 artigos premium para o blog CMBDIGITAL. 
       Retorne um array JSON com: id, slug, title, excerpt, content (HTML rico), category, date, tags (array), metaTitle, metaDescription.`,
       config: {
@@ -56,7 +60,7 @@ export default async function handler(req: any, res: any) {
 
     const articles = JSON.parse(generationResponse.text || "[]");
 
-    // 3. GERAÇÃO DE IMAGENS (SÍNCRONO PARA SIMPLICIDADE NO BACKEND)
+    // 3. GERAÇÃO DE IMAGENS (Utilizando o modelo flash para imagens)
     const finalArticles = await Promise.all(articles.map(async (art: any) => {
       try {
         const imgResponse = await ai.models.generateContent({
@@ -88,6 +92,14 @@ export default async function handler(req: any, res: any) {
 
   } catch (error: any) {
     console.error("Erro na API Curadoria:", error);
+    
+    // Tratamento para limite de cota excedido (Erro 429)
+    if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED")) {
+      return res.status(429).json({ 
+        error: "Limite de cota do Gemini excedido para este modelo. Por favor, tente novamente em alguns instantes." 
+      });
+    }
+
     return res.status(500).json({ error: error.message || 'Falha interna no motor de IA.' });
   }
 }
