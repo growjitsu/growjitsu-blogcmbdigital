@@ -6,11 +6,7 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("ERRO: OPENAI_API_KEY não configurada.");
-    return res.status(500).json({ error: 'Configuração de API ausente no servidor.' });
-  }
-
+  // Inicialização direta utilizando a variável de ambiente configurada na Vercel.
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
@@ -21,7 +17,7 @@ export default async function handler(req: any, res: any) {
       messages: [
         {
           role: "system",
-          content: "Você é o Editor-Chefe Sênior da CMBDIGITAL. Sua escrita é premium, técnica, autoritativa e focada em SEO para o mercado brasileiro. Você gera conteúdo original e factual."
+          content: "Você é o Editor-Chefe Sênior da CMBDIGITAL. Sua escrita é premium, técnica, autoritativa e focada em SEO para o mercado brasileiro. Você gera conteúdo original e factual sem alucinações."
         },
         {
           role: "user",
@@ -34,8 +30,8 @@ export default async function handler(req: any, res: any) {
              - Conteúdo rico e detalhado (Mínimo 400 palavras, em texto puro, sem HTML)
              - Categoria (IA, Tecnologia, Marketing Digital, Produtividade)
              - Tags relevantes
-             - Um prompt detalhado para imagem editorial (inglês).
-          4. Retorne JSON: { "articles": [ { "slug": "...", "title": "...", "excerpt": "...", "content": "...", "category": "...", "tags": ["..."], "promptImagem": "..." } ] }`
+             - Um prompt altamente detalhado para geração de imagem editorial (em inglês).
+          4. Retorne estritamente um JSON no formato: { "articles": [ { "slug": "...", "title": "...", "excerpt": "...", "content": "...", "category": "...", "tags": ["..."], "promptImagem": "..." } ] }`
         }
       ],
       response_format: { type: "json_object" },
@@ -45,13 +41,15 @@ export default async function handler(req: any, res: any) {
     const content = response.choices[0].message.content;
     const data = JSON.parse(content || '{"articles": []}');
 
+    // Processamento final para adicionar metadados de sistema
     const processedArticles = data.articles.map((art: any) => ({
       ...art,
       id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
       author: 'CMBDIGITAL',
       date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
       status: 'draft',
-      image: `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + "," + (art.tags[0] || "tech"))}`
+      // Fallback de imagem baseado em Unsplash para garantir estética imediata
+      image: `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + "," + art.tags[0])}`
     }));
 
     return res.status(200).json({ articles: processedArticles });
@@ -59,7 +57,7 @@ export default async function handler(req: any, res: any) {
   } catch (error: any) {
     console.error("ERRO OPENAI ENGINE:", error);
     return res.status(500).json({ 
-      error: error.message || "Erro interno no motor de curadoria." 
+      error: error.message || "Erro interno no motor de curadoria OpenAI." 
     });
   }
 }
