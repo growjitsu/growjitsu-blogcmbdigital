@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
 export default async function handler(req: any, res: any) {
@@ -6,23 +5,21 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
-  // Validação estrita da variável de ambiente
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
     return res.status(500).json({ 
-      error: 'GEMINI_API_KEY não configurada no ambiente do servidor (Vercel/Local)' 
+      error: 'GEMINI_API_KEY não configurada no ambiente do servidor.' 
     });
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // 1. PROTOCOLO DE PESQUISA (GOOGLE SEARCH GROUNDING)
-    // Usamos o modelo Flash para evitar erros de cota 429 do modelo Pro
+    // PROTOCOLO DEFINITIVO — ETAPA 1: PESQUISA (GROUNDING)
     const researchResponse = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "Identifique as 3 tendências ou notícias mais impactantes de hoje em Tecnologia, IA e Marketing Digital no Brasil. Foque em fatos reais e movimentos de mercado.",
+      contents: "Identifique as 3 tendências ou notícias mais impactantes de hoje em Tecnologia, IA e Marketing Digital no Brasil. Foque em fatos reais e movimentos de mercado para curadoria premium.",
       config: {
         tools: [{ googleSearch: {} }]
       }
@@ -31,14 +28,18 @@ export default async function handler(req: any, res: any) {
     const trendsContext = researchResponse.text;
     const groundingChunks = researchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-    // 2. PROTOCOLO EDITORIAL (GERAÇÃO DE ARTIGOS)
+    // PROTOCOLO DEFINITIVO — ETAPA 2 e 3: GERAÇÃO EDITORIAL
     const generationResponse = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Contexto de tendências reais: ${trendsContext}. 
-      Gere 3 artigos premium seguindo o PROTOCOLO CMBDIGITAL: tom chic, técnico, autoritativo. 
-      Sem menção a IAs, sem exageros, foco em valor real para o leitor.`,
+      contents: `Com base nestas tendências reais: "${trendsContext}", execute o PROTOCOLO DE CURADORIA PREMIUM.
+      Gere 3 artigos em estado de RASCUNHO. Tom chic, técnico e autoritativo.
+      Retorne um array JSON com a estrutura interna do blog: id, slug, title, excerpt, content (HTML com H2/H3), category, date, tags, metaTitle, metaDescription.`,
       config: {
-        systemInstruction: "Você é um Motor de Curadoria Editorial Premium para um blog de autoridade. Crie conteúdo original, SEO-friendly e técnico. Nunca invente fatos. Formate como JSON compatível com a interface de artigos do blog.",
+        systemInstruction: `Você é um Motor de Curadoria Editorial Premium para o blog CMBDIGITAL. 
+        OBJETIVO: Criar conteúdo original, SEO-friendly e técnico. 
+        ESTILO: Moderno, sofisticado, editorial. 
+        RESTRIÇÕES: Não cite que foi gerado por IA. Não mencione OpenAI. Sem clickbait barato. Sem inventar fatos. 
+        QUALIDADE: Valor real para o leitor, alinhado ao Google AdSense Brasil.`,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -49,28 +50,29 @@ export default async function handler(req: any, res: any) {
               slug: { type: Type.STRING },
               title: { type: Type.STRING },
               excerpt: { type: Type.STRING },
-              content: { type: Type.STRING, description: "HTML rico com H2, H3 e listas" },
+              content: { type: Type.STRING },
               category: { type: Type.STRING },
               date: { type: Type.STRING },
               tags: { type: Type.ARRAY, items: { type: Type.STRING } },
               metaTitle: { type: Type.STRING },
-              metaDescription: { type: Type.STRING }
+              metaDescription: { type: Type.STRING },
+              promptImagem: { type: Type.STRING, description: "Prompt para geração de imagem editorial" }
             },
-            required: ["id", "slug", "title", "excerpt", "content", "category", "date", "tags", "metaTitle", "metaDescription"]
+            required: ["id", "slug", "title", "excerpt", "content", "category", "date", "tags", "metaTitle", "metaDescription", "promptImagem"]
           }
         }
       }
     });
 
-    const articles = JSON.parse(generationResponse.text || "[]");
+    const articlesData = JSON.parse(generationResponse.text || "[]");
 
-    // 3. SÍNTESE VISUAL (GEMINI 2.5 FLASH IMAGE)
-    const finalArticles = await Promise.all(articles.map(async (art: any) => {
+    // GERAÇÃO DE IMAGENS BASEADA NO PROMPT GERADO PELO MOTOR EDITORIAL
+    const finalArticles = await Promise.all(articlesData.map(async (art: any) => {
       try {
         const imgResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
-            parts: [{ text: `High-end editorial photography for tech article: "${art.title}". Minimalist obsidian style, corporate sophisticated, dark mode aesthetic, 8k. No text.` }]
+            parts: [{ text: art.promptImagem || `Professional tech editorial photography for: "${art.title}". Obsidian style, 8k.` }]
           }
         });
 
@@ -83,12 +85,13 @@ export default async function handler(req: any, res: any) {
             }
           }
         }
+        
         return { 
           ...art, 
           image: imageUrl, 
           author: 'CMBDIGITAL', 
           status: 'draft',
-          id: `art-${Date.now()}-${Math.random().toString(36).substr(2, 4)}` 
+          id: `cmb-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
         };
       } catch (e) {
         return { 
@@ -106,17 +109,16 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("Erro no Protocolo de Curadoria:", error);
+    console.error("Erro no Protocolo Editorial:", error);
     
-    // Tratamento específico para erro de cota (429)
-    if (error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED")) {
+    if (error.message?.includes("429")) {
       return res.status(429).json({ 
-        error: "O motor Gemini Flash atingiu o limite temporário de requisições. O protocolo será reiniciado automaticamente em 60 segundos." 
+        error: "O motor está processando muitas requisições. O protocolo entrará em espera por 60 segundos." 
       });
     }
 
     return res.status(500).json({ 
-      error: `Falha no Motor de IA: ${error.message || 'Erro desconhecido'}` 
+      error: `Falha no Motor de IA: ${error.message}` 
     });
   }
 }
