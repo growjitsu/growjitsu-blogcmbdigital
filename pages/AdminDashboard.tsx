@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI, Type } from "@google/genai";
 import { Article } from '../types';
 
 // Configuração Supabase
@@ -60,42 +61,114 @@ const AdminDashboard: React.FC = () => {
     await supabase.auth.signOut();
   };
 
-  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-6));
+  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-8));
 
   const generateDailyPosts = async () => {
+    if (!process.env.API_KEY) {
+      addLog("ERRO CRÍTICO: Chave de API não detectada no sistema.");
+      return;
+    }
+
     setIsGenerating(true);
     setLogs([]);
     setSources([]);
-    addLog("Iniciando Protocolo CMBDIGITAL (Motor Flash)...");
+    addLog("Iniciando Protocolo CMBDIGITAL v3.0 (Grounding Ativo)...");
 
     try {
-      addLog("Varrendo tendências com Google Search Grounding...");
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      const response = await fetch('/api/curadoria', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+      addLog("Conectando ao índice do Google Search para análise de tendências...");
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `
+          PESQUISA E REDAÇÃO:
+          1. Localize as 3 tendências de tecnologia e marketing digital mais importantes deste exato momento no Brasil.
+          2. Com base nelas, escreva 3 artigos completos para o blog CMBDIGITAL.
+          3. Estilo: Profissional, técnico, direto ao ponto e focado em SEO.
+          4. Formate estritamente em JSON para rascunho.
+        `,
+        config: {
+          tools: [{ googleSearch: {} }],
+          systemInstruction: "Você é um Editor Sênior de Tecnologia. Gere conteúdo original, factual e de alta autoridade. Retorne apenas o array JSON conforme o esquema.",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                slug: { type: Type.STRING },
+                title: { type: Type.STRING },
+                excerpt: { type: Type.STRING },
+                content: { type: Type.STRING, description: "Conteúdo HTML com H2 e P" },
+                category: { type: Type.STRING },
+                tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                promptImagem: { type: Type.STRING }
+              },
+              required: ["slug", "title", "excerpt", "content", "category", "promptImagem"]
+            }
+          }
+        }
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Erro HTTP ${response.status}`);
-      }
+      const articlesData = JSON.parse(response.text || "[]");
+      const groundingMetadata = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      setSources(groundingMetadata);
 
-      const data = await response.json();
-      
-      if (data.sources) setSources(data.sources);
-      
-      const newDrafts = [...drafts, ...data.articles];
+      addLog(`Pesquisa concluída. ${articlesData.length} artigos estruturados.`);
+      addLog("Iniciando geração de arte editorial personalizada...");
+
+      const finalArticles = await Promise.all(articlesData.map(async (art: any, index: number) => {
+        try {
+          addLog(`Processando imagem para: "${art.title.substring(0, 30)}..."`);
+          const imgResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: `High-quality editorial photography for tech blog: ${art.promptImagem}. Minimalist, cinematic lighting.` }] }
+          });
+
+          let imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200";
+          if (imgResponse.candidates?.[0]?.content?.parts) {
+            for (const part of imgResponse.candidates[0].content.parts) {
+              if (part.inlineData) {
+                imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                break;
+              }
+            }
+          }
+          
+          return {
+            ...art,
+            id: `art-${Date.now()}-${index}`,
+            image: imageUrl,
+            author: 'CMBDIGITAL',
+            date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
+            status: 'draft',
+            metaTitle: art.title,
+            metaDescription: art.excerpt
+          };
+        } catch (e) {
+          return {
+            ...art,
+            id: `art-${Date.now()}-${index}`,
+            image: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200",
+            author: 'CMBDIGITAL',
+            date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
+            status: 'draft'
+          };
+        }
+      }));
+
+      const newDrafts = [...finalArticles, ...drafts];
       setDrafts(newDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(newDrafts));
       
-      addLog("Sucesso: 3 rascunhos de alta autoridade gerados.");
+      addLog("SUCESSO: Protocolos de hoje carregados no terminal.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`FALHA NO PROTOCOLO: ${error.message}`);
+      addLog(`ERRO NO PROTOCOLO: ${error.message}`);
       if (error.message.includes("429")) {
-        addLog("Aguarde 60 segundos antes de tentar nova varredura.");
+        addLog("ALERTA: Cota temporária atingida. Tente novamente em 2 minutos.");
       }
     } finally {
       setIsGenerating(false);
@@ -110,8 +183,7 @@ const AdminDashboard: React.FC = () => {
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    alert("Protocolo publicado no Hub Principal.");
-    window.location.reload();
+    alert("Artigo publicado com sucesso no blog!");
   };
 
   const deleteDraft = (id: string) => {
@@ -125,25 +197,22 @@ const AdminDashboard: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-obsidian px-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-12">
-            <h1 className="text-4xl font-black text-brand-soft uppercase tracking-tighter mb-2">Terminal Curadoria</h1>
-            <p className="text-brand-muted text-[10px] font-bold uppercase tracking-[0.2em]">Autenticação Supabase Requerida</p>
-          </div>
-          <form onSubmit={handleLogin} className="p-10 rounded-[3rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-8">
-            {loginError && <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold rounded-2xl text-center">{loginError}</div>}
+        <div className="w-full max-w-md text-center">
+          <h1 className="text-4xl font-black text-brand-soft uppercase tracking-tighter mb-8">Painel Editorial</h1>
+          <form onSubmit={handleLogin} className="p-8 rounded-[2.5rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-6">
+            {loginError && <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold rounded-xl">{loginError}</div>}
             <input 
               type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 font-bold text-brand-soft outline-none focus:border-brand-cyan"
+              className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-soft outline-none focus:border-brand-cyan"
               placeholder="E-mail" required
             />
             <input 
               type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 font-bold text-brand-soft outline-none focus:border-brand-cyan"
+              className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-soft outline-none focus:border-brand-cyan"
               placeholder="Senha" required
             />
-            <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black text-xs uppercase tracking-[0.4em] hover:bg-brand-purple hover:text-white transition-all shadow-xl">
-              {isLoggingIn ? 'Verificando...' : 'Acessar Sistema'}
+            <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-4 rounded-xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">
+              {isLoggingIn ? 'Autenticando...' : 'Acessar Terminal'}
             </button>
           </form>
         </div>
@@ -152,56 +221,71 @@ const AdminDashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen pt-32 pb-20 bg-brand-obsidian">
+    <div className="min-h-screen pt-32 pb-20 bg-brand-obsidian text-brand-soft">
       <div className="container mx-auto px-4 max-w-6xl">
-        <div className="flex flex-col md:flex-row justify-between items-start mb-16 gap-10">
+        <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
-            <h1 className="text-5xl font-black text-brand-soft tracking-tighter uppercase mb-4">
-              Controle de <span className="text-brand-cyan">Protocolos</span>
-            </h1>
-            <p className="text-brand-muted font-medium">Motor IA Gemini Flash (Alta Estabilidade)</p>
+            <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor de <span className="text-brand-cyan">Curadoria IA</span></h1>
+            <p className="text-brand-muted font-mono text-xs">STATUS: {isGenerating ? 'EXECUTANDO VARREDURA DE MERCADO...' : 'AGUARDANDO COMANDO'}</p>
           </div>
           <div className="flex gap-4">
-            <button onClick={handleLogout} className="px-6 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-brand-graphite text-brand-muted hover:border-red-500 transition-all">Sair</button>
-            <button onClick={generateDailyPosts} disabled={isGenerating} className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] shadow-2xl transition-all ${isGenerating ? 'bg-brand-graphite text-brand-muted animate-pulse cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}>
-              {isGenerating ? 'Varrendo...' : 'Adicionar Varredura'}
-            </button>
+             <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
+             <button 
+              onClick={generateDailyPosts} 
+              disabled={isGenerating} 
+              className={`px-8 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-105 shadow-xl shadow-brand-cyan/20'}`}
+             >
+               {isGenerating ? 'Processando...' : 'Iniciar Varredura'}
+             </button>
           </div>
         </div>
 
+        {/* Terminal de Logs */}
+        <div className="mb-12 p-6 rounded-3xl bg-black/50 border border-brand-graphite/50 font-mono text-[11px] text-brand-cyan/80 min-h-[180px] shadow-inner">
+          {logs.length === 0 ? '> Terminal operacional. Pronto para pesquisa.' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
+        </div>
+
+        {/* Fontes Encontradas */}
         {sources.length > 0 && (
-          <div className="mb-10 p-6 rounded-2xl border border-brand-graphite bg-brand-graphite/10">
-            <h4 className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Fontes Validadas:</h4>
-            <div className="flex flex-wrap gap-4">
-              {sources.map((s, i) => s.web && <a key={i} href={s.web.uri} target="_blank" className="text-[10px] font-bold text-brand-muted hover:text-brand-cyan underline">{s.web.title || s.web.uri}</a>)}
+          <div className="mb-12 p-6 rounded-3xl border border-brand-graphite bg-brand-graphite/10">
+            <p className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Evidências de Pesquisa (Google):</p>
+            <div className="flex flex-wrap gap-3">
+              {sources.map((s, i) => s.web && (
+                <a key={i} href={s.web.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-lg bg-brand-obsidian border border-brand-graphite text-[10px] hover:text-brand-cyan transition-colors truncate max-w-[200px]">
+                  {s.web.title || s.web.uri}
+                </a>
+              ))}
             </div>
           </div>
         )}
 
-        <div className="mb-20 p-8 rounded-[2rem] border border-brand-graphite/50 bg-brand-graphite/30 text-brand-cyan font-mono text-[10px] space-y-2 overflow-hidden shadow-inner min-h-[150px]">
-          {logs.length === 0 ? '> Terminal CMBDIGITAL aguardando instrução.' : logs.map((log, i) => <div key={i}>{log}</div>)}
-        </div>
-
-        <div className="space-y-12">
-          <h2 className="text-2xl font-black uppercase tracking-widest text-brand-soft border-b border-brand-graphite pb-6">Rascunhos Premium ({drafts.length})</h2>
+        {/* Lista de Rascunhos */}
+        <div className="space-y-8">
+          <div className="flex items-center justify-between border-b border-brand-graphite pb-6">
+            <h2 className="text-2xl font-black uppercase tracking-widest">Fila de Publicação ({drafts.length})</h2>
+          </div>
+          
           {drafts.length === 0 ? (
-            <div className="py-20 text-center border-2 border-dashed border-brand-graphite rounded-[3rem]">
-               <p className="text-brand-muted font-bold uppercase tracking-widest text-sm">Fila de curadoria vazia.</p>
+            <div className="py-20 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted">
+              Nenhum rascunho pendente. Inicie a varredura para gerar conteúdo.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-10">
+            <div className="grid grid-cols-1 gap-8">
               {drafts.map(draft => (
-                <div key={draft.id} className="p-8 rounded-[3rem] border border-brand-graphite bg-brand-graphite/20 flex flex-col lg:flex-row gap-10 hover:border-brand-cyan transition-all group">
-                  <div className="lg:w-1/3 rounded-[2rem] overflow-hidden h-64 border border-brand-graphite">
-                    <img src={draft.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="Visual" />
+                <div key={draft.id} className="p-6 rounded-[2.5rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 hover:border-brand-cyan/50 transition-all group">
+                  <div className="md:w-64 h-48 rounded-2xl overflow-hidden border border-brand-graphite shrink-0">
+                    <img src={draft.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="Preview" />
                   </div>
-                  <div className="lg:w-2/3 flex flex-col justify-center">
-                    <span className="text-brand-purple font-black text-[10px] uppercase tracking-widest mb-4">{draft.category}</span>
-                    <h3 className="text-3xl font-black text-brand-soft mb-6 tracking-tighter leading-tight">{draft.title}</h3>
-                    <p className="text-brand-muted mb-10 line-clamp-2 text-sm">{draft.excerpt}</p>
-                    <div className="flex flex-wrap gap-4">
-                      <button onClick={() => publishArticle(draft.id)} className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg">Aprovar e Publicar</button>
-                      <button onClick={() => deleteDraft(draft.id)} className="bg-red-500/10 text-red-500 px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Remover</button>
+                  <div className="flex-grow">
+                    <div className="flex justify-between items-start mb-4">
+                      <span className="text-brand-purple font-black text-[10px] uppercase tracking-widest">{draft.category}</span>
+                      <span className="text-brand-muted text-[10px]">{draft.date}</span>
+                    </div>
+                    <h3 className="text-2xl font-black mb-4 tracking-tighter leading-tight group-hover:text-brand-cyan transition-colors">{draft.title}</h3>
+                    <p className="text-brand-muted text-sm line-clamp-2 mb-8">{draft.excerpt}</p>
+                    <div className="flex gap-4">
+                      <button onClick={() => publishArticle(draft.id)} className="px-6 py-3 rounded-xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">Publicar Agora</button>
+                      <button onClick={() => deleteDraft(draft.id)} className="px-6 py-3 rounded-xl bg-red-500/10 text-red-500 font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Descartar</button>
                     </div>
                   </div>
                 </div>
