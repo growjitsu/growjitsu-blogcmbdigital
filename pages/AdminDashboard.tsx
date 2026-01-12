@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Article } from '../types';
@@ -65,10 +66,10 @@ const AdminDashboard: React.FC = () => {
     setIsGenerating(true);
     setLogs([]);
     setSources([]);
-    addLog("Iniciando Protocolo Seguro via Backend Serverless...");
+    addLog("Iniciando Protocolo CMBDIGITAL (Motor Flash)...");
 
     try {
-      addLog("Solicitando varredura ao servidor (/api/curadoria)...");
+      addLog("Varrendo tendências com Google Search Grounding...");
       
       const response = await fetch('/api/curadoria', {
         method: 'POST',
@@ -77,7 +78,7 @@ const AdminDashboard: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `Erro HTTP ${response.status}: O backend não respondeu corretamente.`);
+        throw new Error(errorData.error || `Erro HTTP ${response.status}`);
       }
 
       const data = await response.json();
@@ -88,12 +89,14 @@ const AdminDashboard: React.FC = () => {
       setDrafts(newDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(newDrafts));
       
-      addLog("Sucesso: 3 novos artigos gerados e fontes validadas.");
+      addLog("Sucesso: 3 rascunhos de alta autoridade gerados.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`FALHA: ${error.message}`);
-      addLog("DICA: Certifique-se de que a GEMINI_API_KEY está configurada no seu ambiente Vercel.");
+      addLog(`FALHA NO PROTOCOLO: ${error.message}`);
+      if (error.message.includes("429")) {
+        addLog("Aguarde 60 segundos antes de tentar nova varredura.");
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -107,7 +110,7 @@ const AdminDashboard: React.FC = () => {
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    alert("Publicado com sucesso!");
+    alert("Protocolo publicado no Hub Principal.");
     window.location.reload();
   };
 
@@ -156,19 +159,19 @@ const AdminDashboard: React.FC = () => {
             <h1 className="text-5xl font-black text-brand-soft tracking-tighter uppercase mb-4">
               Controle de <span className="text-brand-cyan">Protocolos</span>
             </h1>
-            <p className="text-brand-muted font-medium">Ambiente Serverless (API Oculta)</p>
+            <p className="text-brand-muted font-medium">Motor IA Gemini Flash (Alta Estabilidade)</p>
           </div>
           <div className="flex gap-4">
             <button onClick={handleLogout} className="px-6 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-brand-graphite text-brand-muted hover:border-red-500 transition-all">Sair</button>
             <button onClick={generateDailyPosts} disabled={isGenerating} className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] shadow-2xl transition-all ${isGenerating ? 'bg-brand-graphite text-brand-muted animate-pulse cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}>
-              {isGenerating ? 'Processando no Servidor...' : 'Adicionar Varredura'}
+              {isGenerating ? 'Varrendo...' : 'Adicionar Varredura'}
             </button>
           </div>
         </div>
 
         {sources.length > 0 && (
           <div className="mb-10 p-6 rounded-2xl border border-brand-graphite bg-brand-graphite/10">
-            <h4 className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Fontes da Varredura Atual:</h4>
+            <h4 className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Fontes Validadas:</h4>
             <div className="flex flex-wrap gap-4">
               {sources.map((s, i) => s.web && <a key={i} href={s.web.uri} target="_blank" className="text-[10px] font-bold text-brand-muted hover:text-brand-cyan underline">{s.web.title || s.web.uri}</a>)}
             </div>
@@ -176,14 +179,14 @@ const AdminDashboard: React.FC = () => {
         )}
 
         <div className="mb-20 p-8 rounded-[2rem] border border-brand-graphite/50 bg-brand-graphite/30 text-brand-cyan font-mono text-[10px] space-y-2 overflow-hidden shadow-inner min-h-[150px]">
-          {logs.length === 0 ? '> Monitor de Operações em standby.' : logs.map((log, i) => <div key={i}>{log}</div>)}
+          {logs.length === 0 ? '> Terminal CMBDIGITAL aguardando instrução.' : logs.map((log, i) => <div key={i}>{log}</div>)}
         </div>
 
         <div className="space-y-12">
-          <h2 className="text-2xl font-black uppercase tracking-widest text-brand-soft border-b border-brand-graphite pb-6">Rascunhos para Revisão ({drafts.length})</h2>
+          <h2 className="text-2xl font-black uppercase tracking-widest text-brand-soft border-b border-brand-graphite pb-6">Rascunhos Premium ({drafts.length})</h2>
           {drafts.length === 0 ? (
             <div className="py-20 text-center border-2 border-dashed border-brand-graphite rounded-[3rem]">
-               <p className="text-brand-muted font-bold uppercase tracking-widest text-sm">Nenhum rascunho em fila.</p>
+               <p className="text-brand-muted font-bold uppercase tracking-widest text-sm">Fila de curadoria vazia.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-10">
@@ -197,7 +200,7 @@ const AdminDashboard: React.FC = () => {
                     <h3 className="text-3xl font-black text-brand-soft mb-6 tracking-tighter leading-tight">{draft.title}</h3>
                     <p className="text-brand-muted mb-10 line-clamp-2 text-sm">{draft.excerpt}</p>
                     <div className="flex flex-wrap gap-4">
-                      <button onClick={() => publishArticle(draft.id)} className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg">Publicar Artigo</button>
+                      <button onClick={() => publishArticle(draft.id)} className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg">Aprovar e Publicar</button>
                       <button onClick={() => deleteDraft(draft.id)} className="bg-red-500/10 text-red-500 px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Remover</button>
                     </div>
                   </div>
