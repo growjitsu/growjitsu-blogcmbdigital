@@ -61,36 +61,33 @@ const AdminDashboard: React.FC = () => {
     await supabase.auth.signOut();
   };
 
-  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-8));
+  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
 
   const generateDailyPosts = async () => {
-    if (!process.env.API_KEY) {
-      addLog("ERRO CRÍTICO: Chave de API não detectada no sistema.");
-      return;
-    }
-
     setIsGenerating(true);
     setLogs([]);
     setSources([]);
-    addLog("Iniciando Protocolo CMBDIGITAL v3.0 (Grounding Ativo)...");
+    addLog("Iniciando Protocolo CMBDIGITAL v3.2...");
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // Inicialização direta sem trava preventiva. Se a chave não existir, o catch captura o erro da SDK.
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       
-      addLog("Conectando ao índice do Google Search para análise de tendências...");
+      addLog("Conectando ao Motor de Pesquisa Google (Grounding)...");
+      addLog("Buscando tendências de tecnologia no Brasil...");
       
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: `
-          PESQUISA E REDAÇÃO:
-          1. Localize as 3 tendências de tecnologia e marketing digital mais importantes deste exato momento no Brasil.
+          PESQUISA E REDAÇÃO AUTOMÁTICA:
+          1. Localize agora as 3 notícias ou tendências de tecnologia e marketing digital mais quentes do dia no Brasil.
           2. Com base nelas, escreva 3 artigos completos para o blog CMBDIGITAL.
-          3. Estilo: Profissional, técnico, direto ao ponto e focado em SEO.
-          4. Formate estritamente em JSON para rascunho.
+          3. O conteúdo deve ser rico, formatado em HTML (usando tags <h2> e <p>), focado em SEO e autoridade.
+          4. Retorne apenas o array JSON.
         `,
         config: {
           tools: [{ googleSearch: {} }],
-          systemInstruction: "Você é um Editor Sênior de Tecnologia. Gere conteúdo original, factual e de alta autoridade. Retorne apenas o array JSON conforme o esquema.",
+          systemInstruction: "Você é o Editor-Chefe da CMBDIGITAL. Escrita premium, técnica e sem clichês. Retorne estritamente JSON.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -100,7 +97,7 @@ const AdminDashboard: React.FC = () => {
                 slug: { type: Type.STRING },
                 title: { type: Type.STRING },
                 excerpt: { type: Type.STRING },
-                content: { type: Type.STRING, description: "Conteúdo HTML com H2 e P" },
+                content: { type: Type.STRING },
                 category: { type: Type.STRING },
                 tags: { type: Type.ARRAY, items: { type: Type.STRING } },
                 promptImagem: { type: Type.STRING }
@@ -115,15 +112,15 @@ const AdminDashboard: React.FC = () => {
       const groundingMetadata = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       setSources(groundingMetadata);
 
-      addLog(`Pesquisa concluída. ${articlesData.length} artigos estruturados.`);
-      addLog("Iniciando geração de arte editorial personalizada...");
+      addLog(`Sucesso: ${articlesData.length} notícias convertidas em artigos.`);
+      addLog("Iniciando IA Visual para capas editoriais...");
 
       const finalArticles = await Promise.all(articlesData.map(async (art: any, index: number) => {
         try {
-          addLog(`Processando imagem para: "${art.title.substring(0, 30)}..."`);
+          addLog(`Renderizando imagem para: ${art.title.substring(0, 25)}...`);
           const imgResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
-            contents: { parts: [{ text: `High-quality editorial photography for tech blog: ${art.promptImagem}. Minimalist, cinematic lighting.` }] }
+            contents: { parts: [{ text: `Professional tech journalism photography: ${art.promptImagem}. 8k, cinematic, obsidian palette.` }] }
           });
 
           let imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200";
@@ -162,13 +159,13 @@ const AdminDashboard: React.FC = () => {
       setDrafts(newDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(newDrafts));
       
-      addLog("SUCESSO: Protocolos de hoje carregados no terminal.");
+      addLog("CONCLUÍDO: Todos os rascunhos foram salvos na fila.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`ERRO NO PROTOCOLO: ${error.message}`);
-      if (error.message.includes("429")) {
-        addLog("ALERTA: Cota temporária atingida. Tente novamente em 2 minutos.");
+      addLog(`FALHA NO MOTOR: ${error.message}`);
+      if (error.message.includes("API_KEY") || error.message.includes("key")) {
+        addLog("DICA: Verifique se a variável API_KEY está corretamente configurada no painel de controle.");
       }
     } finally {
       setIsGenerating(false);
@@ -183,7 +180,7 @@ const AdminDashboard: React.FC = () => {
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    alert("Artigo publicado com sucesso no blog!");
+    alert("Artigo publicado com sucesso!");
   };
 
   const deleteDraft = (id: string) => {
@@ -198,8 +195,8 @@ const AdminDashboard: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-obsidian px-4">
         <div className="w-full max-w-md text-center">
-          <h1 className="text-4xl font-black text-brand-soft uppercase tracking-tighter mb-8">Painel Editorial</h1>
-          <form onSubmit={handleLogin} className="p-8 rounded-[2.5rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-6">
+          <h1 className="text-4xl font-black text-brand-soft uppercase tracking-tighter mb-8 text-brand-cyan">Terminal Editorial</h1>
+          <form onSubmit={handleLogin} className="p-10 rounded-[3rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-6">
             {loginError && <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold rounded-xl">{loginError}</div>}
             <input 
               type="email" value={email} onChange={(e) => setEmail(e.target.value)}
@@ -211,8 +208,8 @@ const AdminDashboard: React.FC = () => {
               className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-soft outline-none focus:border-brand-cyan"
               placeholder="Senha" required
             />
-            <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-4 rounded-xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">
-              {isLoggingIn ? 'Autenticando...' : 'Acessar Terminal'}
+            <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-4 rounded-xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/20">
+              {isLoggingIn ? 'Autenticando...' : 'Entrar no Sistema'}
             </button>
           </form>
         </div>
@@ -225,67 +222,71 @@ const AdminDashboard: React.FC = () => {
       <div className="container mx-auto px-4 max-w-6xl">
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor de <span className="text-brand-cyan">Curadoria IA</span></h1>
-            <p className="text-brand-muted font-mono text-xs">STATUS: {isGenerating ? 'EXECUTANDO VARREDURA DE MERCADO...' : 'AGUARDANDO COMANDO'}</p>
+            <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor <span className="text-brand-cyan">Automático</span></h1>
+            <p className="text-brand-muted font-mono text-[10px] uppercase tracking-widest">Protocolo de Notícias Ativo: {isGenerating ? 'PROCESSANDO...' : 'READY'}</p>
           </div>
           <div className="flex gap-4">
-             <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
+             <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:text-red-500 transition-all">Sair</button>
              <button 
               onClick={generateDailyPosts} 
               disabled={isGenerating} 
-              className={`px-8 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-105 shadow-xl shadow-brand-cyan/20'}`}
+              className={`px-10 py-4 rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-105 shadow-2xl shadow-brand-cyan/30'}`}
              >
-               {isGenerating ? 'Processando...' : 'Iniciar Varredura'}
+               {isGenerating ? 'Executando Varredura...' : 'Iniciar Pesquisa Diária'}
              </button>
           </div>
         </div>
 
-        {/* Terminal de Logs */}
-        <div className="mb-12 p-6 rounded-3xl bg-black/50 border border-brand-graphite/50 font-mono text-[11px] text-brand-cyan/80 min-h-[180px] shadow-inner">
-          {logs.length === 0 ? '> Terminal operacional. Pronto para pesquisa.' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
+        {/* Terminal Visual */}
+        <div className="mb-12 p-8 rounded-[2rem] bg-black/40 border border-brand-graphite/50 font-mono text-[11px] text-brand-cyan shadow-2xl min-h-[220px]">
+          {logs.length === 0 ? (
+            <div className="opacity-50 italic">> Aguardando instrução. Pressione "Iniciar Pesquisa Diária" para varrer o mercado por notícias reais via Google Grounding.</div>
+          ) : (
+            logs.map((log, i) => <div key={i} className="mb-2 animate-fade-in">> {log}</div>)
+          )}
         </div>
 
-        {/* Fontes Encontradas */}
+        {/* Fontes (Grounding) */}
         {sources.length > 0 && (
-          <div className="mb-12 p-6 rounded-3xl border border-brand-graphite bg-brand-graphite/10">
-            <p className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Evidências de Pesquisa (Google):</p>
-            <div className="flex flex-wrap gap-3">
+          <div className="mb-16 p-6 rounded-[2rem] border border-brand-graphite bg-brand-graphite/10">
+            <p className="text-[10px] font-black uppercase text-brand-purple tracking-[0.3em] mb-4">Fontes de Pesquisa Localizadas:</p>
+            <div className="flex flex-wrap gap-4">
               {sources.map((s, i) => s.web && (
-                <a key={i} href={s.web.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-lg bg-brand-obsidian border border-brand-graphite text-[10px] hover:text-brand-cyan transition-colors truncate max-w-[200px]">
-                  {s.web.title || s.web.uri}
+                <a key={i} href={s.web.uri} target="_blank" rel="noopener noreferrer" className="px-4 py-2 rounded-xl bg-brand-obsidian border border-brand-graphite text-[10px] hover:text-brand-cyan hover:border-brand-cyan transition-all truncate max-w-[250px]">
+                  {s.web.title || "Ver Fonte"}
                 </a>
               ))}
             </div>
           </div>
         )}
 
-        {/* Lista de Rascunhos */}
-        <div className="space-y-8">
-          <div className="flex items-center justify-between border-b border-brand-graphite pb-6">
-            <h2 className="text-2xl font-black uppercase tracking-widest">Fila de Publicação ({drafts.length})</h2>
+        {/* Fila de Drafts */}
+        <div className="space-y-10">
+          <div className="flex items-center justify-between border-b border-brand-graphite pb-8">
+            <h2 className="text-3xl font-black uppercase tracking-tighter">Fila de Rascunhos ({drafts.length})</h2>
           </div>
           
           {drafts.length === 0 ? (
-            <div className="py-20 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted">
-              Nenhum rascunho pendente. Inicie a varredura para gerar conteúdo.
+            <div className="py-24 text-center border-2 border-dashed border-brand-graphite rounded-[4rem] text-brand-muted font-medium italic">
+              Nenhuma postagem na fila. Inicie a varredura para capturar notícias do dia.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-8">
+            <div className="grid grid-cols-1 gap-10">
               {drafts.map(draft => (
-                <div key={draft.id} className="p-6 rounded-[2.5rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 hover:border-brand-cyan/50 transition-all group">
-                  <div className="md:w-64 h-48 rounded-2xl overflow-hidden border border-brand-graphite shrink-0">
-                    <img src={draft.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="Preview" />
+                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/10 border border-brand-graphite flex flex-col md:flex-row gap-10 hover:border-brand-cyan/40 transition-all group">
+                  <div className="md:w-72 h-52 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 shadow-xl">
+                    <img src={draft.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" alt="Capas" />
                   </div>
-                  <div className="flex-grow">
-                    <div className="flex justify-between items-start mb-4">
-                      <span className="text-brand-purple font-black text-[10px] uppercase tracking-widest">{draft.category}</span>
-                      <span className="text-brand-muted text-[10px]">{draft.date}</span>
+                  <div className="flex-grow py-2">
+                    <div className="flex justify-between items-start mb-6">
+                      <span className="px-4 py-1.5 rounded-full bg-brand-purple/20 text-brand-purple font-black text-[9px] uppercase tracking-widest">{draft.category}</span>
+                      <span className="text-brand-muted font-mono text-[10px]">{draft.date}</span>
                     </div>
-                    <h3 className="text-2xl font-black mb-4 tracking-tighter leading-tight group-hover:text-brand-cyan transition-colors">{draft.title}</h3>
-                    <p className="text-brand-muted text-sm line-clamp-2 mb-8">{draft.excerpt}</p>
-                    <div className="flex gap-4">
-                      <button onClick={() => publishArticle(draft.id)} className="px-6 py-3 rounded-xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">Publicar Agora</button>
-                      <button onClick={() => deleteDraft(draft.id)} className="px-6 py-3 rounded-xl bg-red-500/10 text-red-500 font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Descartar</button>
+                    <h3 className="text-3xl font-black mb-4 tracking-tighter group-hover:text-brand-cyan transition-colors leading-tight">{draft.title}</h3>
+                    <p className="text-brand-muted text-sm line-clamp-2 mb-10 leading-relaxed font-medium">{draft.excerpt}</p>
+                    <div className="flex gap-6">
+                      <button onClick={() => publishArticle(draft.id)} className="px-8 py-3.5 rounded-2xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg">Aprovar & Publicar</button>
+                      <button onClick={() => deleteDraft(draft.id)} className="px-8 py-3.5 rounded-2xl border border-brand-graphite text-brand-muted font-black text-[10px] uppercase tracking-widest hover:border-red-500 hover:text-red-500 transition-all">Descartar</button>
                     </div>
                   </div>
                 </div>
