@@ -5,40 +5,34 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
-  // Ação Obrigatória: Leitura exclusiva via process.env
-  const apiKey = process.env.GEMINI_API_KEY;
+  // O sistema utiliza a API_KEY configurada no ambiente para máxima performance e segurança.
+  const apiKey = process.env.API_KEY;
 
   if (!apiKey) {
     return res.status(500).json({ 
-      error: 'GEMINI_API_KEY ausente no ambiente do servidor. Verifique as variáveis no painel da Vercel.' 
+      error: 'API_KEY não localizada. Certifique-se de que a variável de ambiente está configurada.' 
     });
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
 
-    // 1. PROTOCOLO DE PESQUISA E CONTEXTO (USANDO GEMINI 3 FLASH PARA GROUNDING)
-    const researchResponse = await ai.models.generateContent({
+    // PROTOCOLO MESTRE: PESQUISA E GERAÇÃO EM CHAMADA ÚNICA PARA EVITAR 429
+    // O modelo gemini-3-flash-preview é otimizado para busca e resposta rápida.
+    const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: "Identifique as 3 tendências de tecnologia e marketing digital mais importantes de hoje no Brasil. Seja direto e traga fatos reais.",
+      contents: `
+        PROTOCOLO EDITORIAL CMBDIGITAL:
+        1. Pesquise as 3 notícias/tendências mais relevantes de HOJE no Brasil sobre IA, Tecnologia e Marketing Digital.
+        2. Crie 3 artigos completos com tom técnico e sofisticado.
+        3. Cada artigo deve ter: título impactante, slug, excerpt chamativo, content em HTML (usando H2, H3, P e Strong), categoria e meta tags SEO.
+        4. Gere um prompt específico de imagem editorial para cada um.
+        5. Retorne TUDO em um único array JSON.
+      `,
       config: {
         tools: [{ googleSearch: {} }],
-        thinkingConfig: { thinkingBudget: 0 } // Eficiência máxima
-      }
-    });
-
-    const trendsContext = researchResponse.text;
-    const groundingChunks = researchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-    // 2. GERAÇÃO EDITORIAL PREMIUM (CONSOLIDADA)
-    const generationResponse = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Contexto: ${trendsContext}. Gere 3 artigos PREMIUM para o blog CMBDIGITAL. 
-      Siga o PROTOCOLO: tom chic, técnico, autoritativo. Formate em JSON para o banco de rascunhos.`,
-      config: {
-        systemInstruction: "Você é um Motor Editorial de Elite. Gere conteúdo de alta autoridade, sem clichês de IA. Retorne estritamente um array JSON de objetos seguindo o schema fornecido.",
+        systemInstruction: "Você é o Editor-Chefe da CMBDIGITAL. Sua escrita é premium, autoritativa e focada em conversão. Você nunca usa clichês de IA. Retorne apenas JSON puro.",
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 0 },
         responseSchema: {
           type: Type.ARRAY,
           items: {
@@ -48,7 +42,7 @@ export default async function handler(req: any, res: any) {
               slug: { type: Type.STRING },
               title: { type: Type.STRING },
               excerpt: { type: Type.STRING },
-              content: { type: Type.STRING, description: "HTML premium com H2/H3" },
+              content: { type: Type.STRING },
               category: { type: Type.STRING },
               date: { type: Type.STRING },
               tags: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -56,25 +50,27 @@ export default async function handler(req: any, res: any) {
               metaDescription: { type: Type.STRING },
               promptImagem: { type: Type.STRING }
             },
-            required: ["id", "slug", "title", "excerpt", "content", "category", "date", "tags", "metaTitle", "metaDescription", "promptImagem"]
+            required: ["slug", "title", "excerpt", "content", "category", "tags", "promptImagem"]
           }
         }
       }
     });
 
-    const articlesData = JSON.parse(generationResponse.text || "[]");
+    const articlesData = JSON.parse(response.text || "[]");
+    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-    // 3. GERAÇÃO VISUAL (SINCRONIZADA)
+    // GERAÇÃO DE IMAGENS COM FALLBACK SEGURO
     const finalArticles = await Promise.all(articlesData.map(async (art: any) => {
       try {
         const imgResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
-            parts: [{ text: art.promptImagem || `High-end minimalist tech photography for: "${art.title}". 8k, obsidian style.` }]
+            parts: [{ text: `Professional editorial tech photography, cinematic lighting, high contrast: ${art.promptImagem}` }]
           }
         });
 
-        let imageUrl = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200";
+        let imageUrl = `https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200&auto=format`;
+        
         if (imgResponse.candidates?.[0]?.content?.parts) {
           for (const part of imgResponse.candidates[0].content.parts) {
             if (part.inlineData) {
@@ -86,13 +82,22 @@ export default async function handler(req: any, res: any) {
         
         return { 
           ...art, 
+          id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
           image: imageUrl, 
           author: 'CMBDIGITAL', 
-          status: 'draft',
-          id: `cmb-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+          date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
+          status: 'draft'
         };
       } catch (e) {
-        return { ...art, image: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200", author: 'CMBDIGITAL', status: 'draft' };
+        // Fallback para não quebrar o rascunho se a geração de imagem falhar
+        return { 
+          ...art, 
+          id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
+          image: `https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format`, 
+          author: 'CMBDIGITAL', 
+          date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
+          status: 'draft' 
+        };
       }
     }));
 
@@ -102,17 +107,15 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("Erro no Protocolo Editorial:", error);
+    console.error("FALHA NO MOTOR EDITORIAL:", error);
     
-    // Tratamento Robusto de Quota
-    if (error.status === 429 || error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED")) {
-      return res.status(429).json({ 
-        error: "Cota do motor Gemini esgotada. Por favor, aguarde 60 segundos antes de tentar uma nova varredura de mercado." 
-      });
-    }
+    const statusCode = error.status || 500;
+    const isQuotaError = error.message?.includes("429") || error.status === 429;
 
-    return res.status(500).json({ 
-      error: `Erro no Motor Editorial: ${error.message || 'Falha na conexão com a IA'}` 
+    return res.status(statusCode).json({ 
+      error: isQuotaError 
+        ? "Cota de pesquisa temporariamente excedida. O sistema reiniciará automaticamente em 60 segundos." 
+        : `Erro técnico no motor: ${error.message}`
     });
   }
 }
