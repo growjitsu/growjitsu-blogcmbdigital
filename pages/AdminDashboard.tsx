@@ -3,7 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
 import { Article } from '../types';
 
-// Inicialização do Supabase
+// Inicialização robusta do Client Supabase
 const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
 const supabaseAnonKey = 'sb_publishable_36McnPdKx5T7gEKzeMQYDQ_o44rEiYJ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -21,19 +21,29 @@ const AdminDashboard: React.FC = () => {
   const [sources, setSources] = useState<any[]>([]);
 
   useEffect(() => {
-    // Verificar sessão ativa no mount
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setIsAuthenticated(!!session);
+    // 1. Verificar sessão ativa imediatamente no carregamento
+    const checkInitialSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        setIsAuthenticated(!!session);
+      } catch (err) {
+        console.error("Erro ao verificar sessão inicial:", err);
+        setIsAuthenticated(false);
+      }
     };
 
-    checkSession();
+    checkInitialSession();
 
-    // Listener para mudanças de estado de autenticação
+    // 2. Escutar mudanças de estado (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
+      if (session) {
+        setLoginError('');
+      }
     });
 
+    // 3. Carregar rascunhos locais
     const savedDrafts = localStorage.getItem('cmb_drafts');
     if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
 
@@ -46,18 +56,22 @@ const AdminDashboard: React.FC = () => {
     setLoginError('');
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      // OBRIGATÓRIO: Uso exclusivo de signInWithPassword para usuários existentes
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password,
       });
 
       if (error) {
+        // Log detalhado para diagnóstico no console do desenvolvedor
+        console.error("Erro detalhado do Supabase:", error);
         throw error;
       }
       
-      // O listener onAuthStateChange cuidará do estado isAuthenticated
+      console.log("Conexão estabelecida com sucesso para:", data.user?.email);
     } catch (error: any) {
-      setLoginError(error.message || 'Erro ao conectar com o servidor central.');
+      // Exibe a mensagem real do erro (Ex: "Email not confirmed" ou "Invalid login credentials")
+      setLoginError(error.message || 'Falha na autenticação com o servidor central.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -185,7 +199,7 @@ const AdminDashboard: React.FC = () => {
     );
   }
 
-  // TELA DE LOGIN
+  // TELA DE LOGIN (SUPABASE AUTH)
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center dark:bg-brand-obsidian bg-brand-lightBg px-4 py-20">
@@ -199,31 +213,31 @@ const AdminDashboard: React.FC = () => {
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-brand-cyan mb-8 shadow-2xl shadow-brand-cyan/20">
               <span className="text-brand-obsidian font-black text-3xl">C</span>
             </div>
-            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4 uppercase">Acesso Autorizado</h1>
-            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Portal de Gerenciamento Supabase</p>
+            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4 uppercase">Área do Curador</h1>
+            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Autenticação via Supabase Central</p>
           </div>
 
           <form onSubmit={handleLogin} className="p-10 rounded-[3rem] border dark:bg-brand-graphite dark:border-brand-graphite bg-white border-slate-200 shadow-2xl">
             {loginError && (
-              <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-xs font-bold text-center">
+              <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-xs font-bold text-center leading-relaxed">
                 {loginError}
               </div>
             )}
             
             <div className="space-y-8">
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">E-mail Corporativo</label>
+                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">E-mail de Acesso</label>
                 <input 
                   type="email" 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan focus:ring-0 transition-all"
-                  placeholder="seu@email.com"
+                  placeholder="admin@cmbdigital.com"
                   required
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">Credencial</label>
+                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">Senha Privada</label>
                 <input 
                   type="password" 
                   value={password}
@@ -238,13 +252,14 @@ const AdminDashboard: React.FC = () => {
                 disabled={isLoggingIn}
                 className={`w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black text-xs uppercase tracking-[0.4em] transition-all shadow-xl shadow-brand-cyan/10 ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-purple hover:text-white'}`}
               >
-                {isLoggingIn ? 'Autenticando...' : 'Estabelecer Conexão'}
+                {isLoggingIn ? 'Verificando...' : 'Sincronizar Credenciais'}
               </button>
             </div>
           </form>
           
-          <p className="mt-12 text-center text-[10px] font-bold dark:text-brand-muted text-slate-400 tracking-[0.2em]">
-            CONECTADO À INFRAESTRUTURA SUPABASE <br/> CMBDIGITAL &copy; 2025
+          <p className="mt-12 text-center text-[10px] font-bold dark:text-brand-muted text-slate-400 tracking-[0.2em] leading-loose">
+            PROJETO: QGWGVT... <br/>
+            SISTEMA DE SEGURANÇA SUPABASE &copy; 2025
           </p>
         </div>
       </div>
@@ -267,7 +282,7 @@ const AdminDashboard: React.FC = () => {
               onClick={handleLogout}
               className="px-6 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] transition-all border dark:border-brand-graphite dark:text-brand-muted hover:border-red-500 hover:text-red-500"
             >
-              Encerrar Sessão
+              Log Out
             </button>
             <button 
               onClick={generateDailyPosts}
