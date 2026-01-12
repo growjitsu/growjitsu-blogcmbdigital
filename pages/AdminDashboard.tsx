@@ -3,15 +3,38 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Article, Category } from '../types';
 
 const AdminDashboard: React.FC = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [drafts, setDrafts] = useState<Article[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [sources, setSources] = useState<any[]>([]);
 
   useEffect(() => {
+    // Verificar se já existe uma sessão ativa
+    const authStatus = sessionStorage.getItem('cmb_admin_auth');
+    if (authStatus === 'true') {
+      setIsAuthenticated(true);
+    }
+
     const savedDrafts = localStorage.getItem('cmb_drafts');
     if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
   }, []);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Credenciais de acesso (Hardcoded para este contexto de aplicação estática)
+    if (username === 'admin' && password === 'cmb2025') {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('cmb_admin_auth', 'true');
+      setLoginError('');
+    } else {
+      setLoginError('Credenciais inválidas. Acesso negado pelo protocolo de segurança.');
+    }
+  };
 
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-5));
 
@@ -24,27 +47,23 @@ const AdminDashboard: React.FC = () => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // ETAPA 1: Pesquisa via Google Search Grounding
-      // Nota: Não pedimos JSON aqui para evitar erros de parsing causados por metadados de grounding.
       const researchResponse = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: `Identifique as 3 tendências mais importantes de hoje em Inteligência Artificial, Marketing Digital e Tecnologia. Forneça fatos específicos.`,
+        contents: `Identifique as 3 tendências mais importantes de hoje em Inteligência Artificial, Marketing Digital e Tecnologia no Brasil. Forneça fatos específicos.`,
         config: {
           tools: [{ googleSearch: {} }]
         }
       });
 
-      // Extrair links de grounding (obrigatório pelas diretrizes)
       const groundingChunks = researchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks;
       if (groundingChunks) setSources(groundingChunks);
 
       addLog("Tendências identificadas. Iniciando redação estruturada...");
 
-      // ETAPA 2: Redação Estruturada em JSON (sem ferramentas para garantir parsing seguro)
       const generationResponse = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: `Com base nestas tendências: "${researchResponse.text}", crie 3 artigos completos para o blog CMBDIGITAL. 
-        Retorne um array JSON com: id, slug, title, excerpt, content (HTML rico), category, date (Hoje), tags (array), metaTitle, metaDescription.`,
+        contents: `Com base nestas tendências: "${researchResponse.text}", crie 3 artigos completos para o blog CMBDIGITAL em português brasileiro. 
+        Retorne um array JSON com: id, slug, title, excerpt, content (HTML rico com h2, h3, p, strong, ul, li), category, date (Hoje), tags (array), metaTitle, metaDescription.`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -72,19 +91,17 @@ const AdminDashboard: React.FC = () => {
       const generatedArticles = JSON.parse(generationResponse.text);
       addLog("Conteúdo redigido. Gerando visuais de alta performance...");
 
-      // ETAPA 3: Geração de Imagens (Nano Banana)
       const articlesWithImages = await Promise.all(generatedArticles.map(async (art: any) => {
         addLog(`Gerando visual para: ${art.title.substring(0, 30)}...`);
         
         const imgResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
-            parts: [{ text: `A professional, minimalist high-quality tech photograph for: "${art.title}". Navy blue tones, 8k resolution. No text.` }]
+            parts: [{ text: `A professional, minimalist high-quality tech photograph for: "${art.title}". Corporate tech style, navy blue and cyan tones, 8k resolution. No text.` }]
           }
         });
 
         let imageUrl = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200";
-        // Correção: Iterar todas as partes para encontrar a imagem
         if (imgResponse.candidates?.[0]?.content?.parts) {
           for (const part of imgResponse.candidates[0].content.parts) {
             if (part.inlineData) {
@@ -104,7 +121,7 @@ const AdminDashboard: React.FC = () => {
 
     } catch (error) {
       console.error(error);
-      addLog("Erro no protocolo: Verifique sua conexão e chave.");
+      addLog("Erro no protocolo: Verifique sua conexão e chave de API.");
     } finally {
       setIsGenerating(false);
     }
@@ -128,6 +145,72 @@ const AdminDashboard: React.FC = () => {
     localStorage.setItem('cmb_drafts', JSON.stringify(remaining));
   };
 
+  // TELA DE LOGIN
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center dark:bg-brand-obsidian bg-brand-lightBg px-4 py-20">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-brand-purple/5 rounded-full blur-[120px]"></div>
+          <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-brand-cyan/5 rounded-full blur-[100px]"></div>
+        </div>
+
+        <div className="w-full max-w-md relative z-10">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-brand-cyan mb-8 shadow-2xl shadow-brand-cyan/20">
+              <span className="text-brand-obsidian font-black text-3xl">C</span>
+            </div>
+            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4">ACESSO RESTRITO</h1>
+            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Terminal de Curadoria Ativa CMBDIGITAL</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="p-10 rounded-[3rem] border dark:bg-brand-graphite dark:border-brand-graphite bg-white border-slate-200 shadow-2xl">
+            {loginError && (
+              <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-xs font-bold text-center">
+                {loginError}
+              </div>
+            )}
+            
+            <div className="space-y-8">
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">Usuário</label>
+                <input 
+                  type="text" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan focus:ring-0 transition-all"
+                  placeholder="admin"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">Credencial</label>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan focus:ring-0 transition-all"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+              <button 
+                type="submit"
+                className="w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black text-xs uppercase tracking-[0.4em] hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/10"
+              >
+                Estabelecer Conexão
+              </button>
+            </div>
+          </form>
+          
+          <p className="mt-12 text-center text-[10px] font-bold dark:text-brand-muted text-slate-400 tracking-[0.2em]">
+            PROTEGIDO POR CRIPTOGRAFIA DE PONTA <br/> CMBDIGITAL &copy; 2025
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // DASHBOARD AUTENTICADO
   return (
     <div className="min-h-screen pt-32 pb-20 dark:bg-brand-obsidian bg-brand-lightBg">
       <div className="container mx-auto px-4 max-w-6xl">
@@ -138,13 +221,24 @@ const AdminDashboard: React.FC = () => {
             </h1>
             <p className="text-brand-muted font-medium">Motor de inteligência CMBDIGITAL v2.0</p>
           </div>
-          <button 
-            onClick={generateDailyPosts}
-            disabled={isGenerating}
-            className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite text-brand-muted cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}
-          >
-            {isGenerating ? 'Processando Protocolo...' : 'Acionar Varredura Diária'}
-          </button>
+          <div className="flex gap-4">
+            <button 
+              onClick={() => {
+                sessionStorage.removeItem('cmb_admin_auth');
+                setIsAuthenticated(false);
+              }}
+              className="px-6 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] transition-all border dark:border-brand-graphite dark:text-brand-muted hover:border-red-500 hover:text-red-500"
+            >
+              Encerrar Sessão
+            </button>
+            <button 
+              onClick={generateDailyPosts}
+              disabled={isGenerating}
+              className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite text-brand-muted cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}
+            >
+              {isGenerating ? 'Processando Protocolo...' : 'Acionar Varredura Diária'}
+            </button>
+          </div>
         </div>
 
         {/* Fontes de Grounding */}
