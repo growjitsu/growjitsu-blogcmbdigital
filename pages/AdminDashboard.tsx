@@ -61,33 +61,36 @@ const AdminDashboard: React.FC = () => {
     await supabase.auth.signOut();
   };
 
-  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
+  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-8));
 
   const generateDailyPosts = async () => {
+    if (!process.env.API_KEY) {
+      addLog("ERRO CRÍTICO: Chave de API não detectada no sistema.");
+      return;
+    }
+
     setIsGenerating(true);
     setLogs([]);
     setSources([]);
-    addLog("Iniciando Protocolo CMBDIGITAL v3.5...");
+    addLog("Iniciando Protocolo CMBDIGITAL v3.0 (Grounding Ativo)...");
 
     try {
-      // Inicialização direta do SDK. O ambiente injeta a API_KEY automaticamente.
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      addLog("Sincronizando com Google Search Index...");
-      addLog("Localizando tendências de tecnologia e marketing no Brasil...");
+      addLog("Conectando ao índice do Google Search para análise de tendências...");
       
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: `
-          EXECUÇÃO EDITORIAL:
-          1. Pesquise as 3 tendências de tecnologia ou negócios digitais mais importantes de hoje no Brasil.
-          2. Escreva 3 artigos profissionais completos (HTML com H2 e P).
-          3. Garanta SEO agressivo e tom de autoridade.
-          4. Retorne apenas JSON puro.
+          PESQUISA E REDAÇÃO:
+          1. Localize as 3 tendências de tecnologia e marketing digital mais importantes deste exato momento no Brasil.
+          2. Com base nelas, escreva 3 artigos completos para o blog CMBDIGITAL.
+          3. Estilo: Profissional, técnico, direto ao ponto e focado em SEO.
+          4. Formate estritamente em JSON para rascunho.
         `,
         config: {
           tools: [{ googleSearch: {} }],
-          systemInstruction: "Você é o Editor Senior da CMBDIGITAL. Retorne estritamente um array JSON com slug, title, excerpt, content, category, tags e promptImagem.",
+          systemInstruction: "Você é um Editor Sênior de Tecnologia. Gere conteúdo original, factual e de alta autoridade. Retorne apenas o array JSON conforme o esquema.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -97,7 +100,7 @@ const AdminDashboard: React.FC = () => {
                 slug: { type: Type.STRING },
                 title: { type: Type.STRING },
                 excerpt: { type: Type.STRING },
-                content: { type: Type.STRING },
+                content: { type: Type.STRING, description: "Conteúdo HTML com H2 e P" },
                 category: { type: Type.STRING },
                 tags: { type: Type.ARRAY, items: { type: Type.STRING } },
                 promptImagem: { type: Type.STRING }
@@ -112,15 +115,15 @@ const AdminDashboard: React.FC = () => {
       const groundingMetadata = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       setSources(groundingMetadata);
 
-      addLog(`Sucesso: ${articlesData.length} tópicos reais identificados.`);
-      addLog("Gerando arte editorial via IA...");
+      addLog(`Pesquisa concluída. ${articlesData.length} artigos estruturados.`);
+      addLog("Iniciando geração de arte editorial personalizada...");
 
       const finalArticles = await Promise.all(articlesData.map(async (art: any, index: number) => {
         try {
-          addLog(`Processando imagem para: ${art.title.substring(0, 30)}...`);
+          addLog(`Processando imagem para: "${art.title.substring(0, 30)}..."`);
           const imgResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
-            contents: { parts: [{ text: `High-end tech blog header: ${art.promptImagem}. Clean, modern, 4k.` }] }
+            contents: { parts: [{ text: `High-quality editorial photography for tech blog: ${art.promptImagem}. Minimalist, cinematic lighting.` }] }
           });
 
           let imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200";
@@ -139,7 +142,9 @@ const AdminDashboard: React.FC = () => {
             image: imageUrl,
             author: 'CMBDIGITAL',
             date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
-            status: 'draft'
+            status: 'draft',
+            metaTitle: art.title,
+            metaDescription: art.excerpt
           };
         } catch (e) {
           return {
@@ -157,13 +162,13 @@ const AdminDashboard: React.FC = () => {
       setDrafts(newDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(newDrafts));
       
-      addLog("CONCLUÍDO: Todos os protocolos salvos na fila.");
+      addLog("SUCESSO: Protocolos de hoje carregados no terminal.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`ERRO NO MOTOR: ${error.message}`);
-      if (error.message.includes("key") || error.message.includes("403") || error.message.includes("401")) {
-        addLog("ALERTA: A chave de API pode estar incorreta ou inativa no console Google.");
+      addLog(`ERRO NO PROTOCOLO: ${error.message}`);
+      if (error.message.includes("429")) {
+        addLog("ALERTA: Cota temporária atingida. Tente novamente em 2 minutos.");
       }
     } finally {
       setIsGenerating(false);
@@ -178,7 +183,7 @@ const AdminDashboard: React.FC = () => {
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    alert("Artigo publicado com sucesso!");
+    alert("Artigo publicado com sucesso no blog!");
   };
 
   const deleteDraft = (id: string) => {
@@ -206,7 +211,7 @@ const AdminDashboard: React.FC = () => {
               className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-soft outline-none focus:border-brand-cyan"
               placeholder="Senha" required
             />
-            <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-4 rounded-xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/20">
+            <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-4 rounded-xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">
               {isLoggingIn ? 'Autenticando...' : 'Acessar Terminal'}
             </button>
           </form>
@@ -220,71 +225,67 @@ const AdminDashboard: React.FC = () => {
       <div className="container mx-auto px-4 max-w-6xl">
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-[10px] tracking-widest">STATUS: {isGenerating ? 'PROCESSANDO...' : 'AGUARDANDO COMANDO'}</p>
+            <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor de <span className="text-brand-cyan">Curadoria IA</span></h1>
+            <p className="text-brand-muted font-mono text-xs">STATUS: {isGenerating ? 'EXECUTANDO VARREDURA DE MERCADO...' : 'AGUARDANDO COMANDO'}</p>
           </div>
           <div className="flex gap-4">
              <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
              <button 
               onClick={generateDailyPosts} 
               disabled={isGenerating} 
-              className={`px-10 py-4 rounded-xl font-black text-xs uppercase tracking-[0.2em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite cursor-not-allowed opacity-50' : 'bg-brand-cyan text-brand-obsidian hover:scale-105 shadow-brand-cyan/20'}`}
+              className={`px-8 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-105 shadow-xl shadow-brand-cyan/20'}`}
              >
-               {isGenerating ? 'Aguarde...' : 'Iniciar Pesquisa em Tempo Real'}
+               {isGenerating ? 'Processando...' : 'Iniciar Varredura'}
              </button>
           </div>
         </div>
 
         {/* Terminal de Logs */}
-        <div className="mb-12 p-8 rounded-[2rem] bg-black/40 border border-brand-graphite/50 font-mono text-[11px] text-brand-cyan min-h-[220px] shadow-inner overflow-hidden">
-          {logs.length === 0 ? (
-            <div className="opacity-40 italic">> Sistema pronto. Clique no botão acima para iniciar a varredura do índice Google.</div>
-          ) : (
-            logs.map((log, i) => <div key={i} className="mb-1.5 animate-fade-in">> {log}</div>)
-          )}
+        <div className="mb-12 p-6 rounded-3xl bg-black/50 border border-brand-graphite/50 font-mono text-[11px] text-brand-cyan/80 min-h-[180px] shadow-inner">
+          {logs.length === 0 ? '> Terminal operacional. Pronto para pesquisa.' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
         </div>
 
-        {/* Fontes */}
+        {/* Fontes Encontradas */}
         {sources.length > 0 && (
           <div className="mb-12 p-6 rounded-3xl border border-brand-graphite bg-brand-graphite/10">
-            <p className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Evidências Encontradas (Google Grounding):</p>
+            <p className="text-[10px] font-black uppercase text-brand-purple tracking-widest mb-4">Evidências de Pesquisa (Google):</p>
             <div className="flex flex-wrap gap-3">
               {sources.map((s, i) => s.web && (
                 <a key={i} href={s.web.uri} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 rounded-lg bg-brand-obsidian border border-brand-graphite text-[10px] hover:text-brand-cyan transition-colors truncate max-w-[200px]">
-                  {s.web.title || "Ver Fonte"}
+                  {s.web.title || s.web.uri}
                 </a>
               ))}
             </div>
           </div>
         )}
 
-        {/* Fila */}
-        <div className="space-y-10">
-          <div className="flex items-center justify-between border-b border-brand-graphite pb-8">
-            <h2 className="text-2xl font-black uppercase tracking-widest">Fila de Rascunhos ({drafts.length})</h2>
+        {/* Lista de Rascunhos */}
+        <div className="space-y-8">
+          <div className="flex items-center justify-between border-b border-brand-graphite pb-6">
+            <h2 className="text-2xl font-black uppercase tracking-widest">Fila de Publicação ({drafts.length})</h2>
           </div>
           
           {drafts.length === 0 ? (
-            <div className="py-24 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted italic">
-              Nenhum conteúdo pendente.
+            <div className="py-20 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted">
+              Nenhum rascunho pendente. Inicie a varredura para gerar conteúdo.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-10">
+            <div className="grid grid-cols-1 gap-8">
               {drafts.map(draft => (
-                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-10 hover:border-brand-cyan/40 transition-all group">
-                  <div className="md:w-64 h-48 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0">
-                    <img src={draft.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" alt="Preview" />
+                <div key={draft.id} className="p-6 rounded-[2.5rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 hover:border-brand-cyan/50 transition-all group">
+                  <div className="md:w-64 h-48 rounded-2xl overflow-hidden border border-brand-graphite shrink-0">
+                    <img src={draft.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="Preview" />
                   </div>
                   <div className="flex-grow">
                     <div className="flex justify-between items-start mb-4">
-                      <span className="text-brand-purple font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full bg-brand-purple/10 border border-brand-purple/20">{draft.category}</span>
-                      <span className="text-brand-muted font-mono text-[10px]">{draft.date}</span>
+                      <span className="text-brand-purple font-black text-[10px] uppercase tracking-widest">{draft.category}</span>
+                      <span className="text-brand-muted text-[10px]">{draft.date}</span>
                     </div>
                     <h3 className="text-2xl font-black mb-4 tracking-tighter leading-tight group-hover:text-brand-cyan transition-colors">{draft.title}</h3>
-                    <p className="text-brand-muted text-sm line-clamp-2 mb-8 font-medium">{draft.excerpt}</p>
+                    <p className="text-brand-muted text-sm line-clamp-2 mb-8">{draft.excerpt}</p>
                     <div className="flex gap-4">
-                      <button onClick={() => publishArticle(draft.id)} className="px-8 py-3.5 rounded-2xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg">Publicar</button>
-                      <button onClick={() => deleteDraft(draft.id)} className="px-8 py-3.5 rounded-2xl border border-brand-graphite text-brand-muted font-black text-[10px] uppercase tracking-widest hover:border-red-500 hover:text-red-500 transition-all">Descartar</button>
+                      <button onClick={() => publishArticle(draft.id)} className="px-6 py-3 rounded-xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">Publicar Agora</button>
+                      <button onClick={() => deleteDraft(draft.id)} className="px-6 py-3 rounded-xl bg-red-500/10 text-red-500 font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Descartar</button>
                     </div>
                   </div>
                 </div>
