@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
-import { Article, Category } from '../types';
+import { createClient } from '@supabase/supabase-js';
+import { Article } from '../types';
+
+// Inicialização do Supabase
+const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
+const supabaseAnonKey = 'sb_publishable_36McnPdKx5T7gEKzeMQYDQ_o44rEiYJ';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const AdminDashboard: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [username, setUsername] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState('');
   
   const [isGenerating, setIsGenerating] = useState(false);
@@ -14,26 +21,50 @@ const AdminDashboard: React.FC = () => {
   const [sources, setSources] = useState<any[]>([]);
 
   useEffect(() => {
-    // Verificar se já existe uma sessão ativa
-    const authStatus = sessionStorage.getItem('cmb_admin_auth');
-    if (authStatus === 'true') {
-      setIsAuthenticated(true);
-    }
+    // Verificar sessão ativa no mount
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsAuthenticated(!!session);
+    };
+
+    checkSession();
+
+    // Listener para mudanças de estado de autenticação
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthenticated(!!session);
+    });
 
     const savedDrafts = localStorage.getItem('cmb_drafts');
     if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Credenciais de acesso (Hardcoded para este contexto de aplicação estática)
-    if (username === 'admin' && password === 'cmb2025') {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('cmb_admin_auth', 'true');
-      setLoginError('');
-    } else {
-      setLoginError('Credenciais inválidas. Acesso negado pelo protocolo de segurança.');
+    setIsLoggingIn(true);
+    setLoginError('');
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw error;
+      }
+      
+      // O listener onAuthStateChange cuidará do estado isAuthenticated
+    } catch (error: any) {
+      setLoginError(error.message || 'Erro ao conectar com o servidor central.');
+    } finally {
+      setIsLoggingIn(false);
     }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
   };
 
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-5));
@@ -145,6 +176,15 @@ const AdminDashboard: React.FC = () => {
     localStorage.setItem('cmb_drafts', JSON.stringify(remaining));
   };
 
+  // ESTADO DE CARREGAMENTO INICIAL
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center dark:bg-brand-obsidian bg-brand-lightBg">
+        <div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
   // TELA DE LOGIN
   if (!isAuthenticated) {
     return (
@@ -159,8 +199,8 @@ const AdminDashboard: React.FC = () => {
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-brand-cyan mb-8 shadow-2xl shadow-brand-cyan/20">
               <span className="text-brand-obsidian font-black text-3xl">C</span>
             </div>
-            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4">ACESSO RESTRITO</h1>
-            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Terminal de Curadoria Ativa CMBDIGITAL</p>
+            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4 uppercase">Acesso Autorizado</h1>
+            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Portal de Gerenciamento Supabase</p>
           </div>
 
           <form onSubmit={handleLogin} className="p-10 rounded-[3rem] border dark:bg-brand-graphite dark:border-brand-graphite bg-white border-slate-200 shadow-2xl">
@@ -172,13 +212,13 @@ const AdminDashboard: React.FC = () => {
             
             <div className="space-y-8">
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">Usuário</label>
+                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">E-mail Corporativo</label>
                 <input 
-                  type="text" 
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan focus:ring-0 transition-all"
-                  placeholder="admin"
+                  placeholder="seu@email.com"
                   required
                 />
               </div>
@@ -195,15 +235,16 @@ const AdminDashboard: React.FC = () => {
               </div>
               <button 
                 type="submit"
-                className="w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black text-xs uppercase tracking-[0.4em] hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/10"
+                disabled={isLoggingIn}
+                className={`w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black text-xs uppercase tracking-[0.4em] transition-all shadow-xl shadow-brand-cyan/10 ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-purple hover:text-white'}`}
               >
-                Estabelecer Conexão
+                {isLoggingIn ? 'Autenticando...' : 'Estabelecer Conexão'}
               </button>
             </div>
           </form>
           
           <p className="mt-12 text-center text-[10px] font-bold dark:text-brand-muted text-slate-400 tracking-[0.2em]">
-            PROTEGIDO POR CRIPTOGRAFIA DE PONTA <br/> CMBDIGITAL &copy; 2025
+            CONECTADO À INFRAESTRUTURA SUPABASE <br/> CMBDIGITAL &copy; 2025
           </p>
         </div>
       </div>
@@ -223,10 +264,7 @@ const AdminDashboard: React.FC = () => {
           </div>
           <div className="flex gap-4">
             <button 
-              onClick={() => {
-                sessionStorage.removeItem('cmb_admin_auth');
-                setIsAuthenticated(false);
-              }}
+              onClick={handleLogout}
               className="px-6 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] transition-all border dark:border-brand-graphite dark:text-brand-muted hover:border-red-500 hover:text-red-500"
             >
               Encerrar Sessão
