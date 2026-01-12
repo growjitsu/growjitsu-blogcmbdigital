@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR" class="dark" style="scroll-behavior: smooth;">
   <head>
@@ -23,7 +22,6 @@
                 amber: '#FF9F1C',
                 soft: '#F5F7FA',
                 muted: '#9AA4AF',
-                // Cores para Modo Claro
                 lightBg: '#F8FAFC',
                 lightCard: '#FFFFFF',
                 lightText: '#0F172A',
@@ -49,15 +47,13 @@
       }
     </script>
     <style>
-      /* Transição Global de Cores */
       * { transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease; }
-
       body { 
         background-color: #0B0F14; 
         color: #F5F7FA; 
         -webkit-font-smoothing: antialiased;
+        margin: 0;
       }
-
       html.dark body {
         background-image: 
           radial-gradient(circle at 50% 50%, rgba(108, 92, 231, 0.03) 0%, transparent 50%),
@@ -65,7 +61,6 @@
           linear-gradient(90deg, rgba(28, 34, 43, 0.2) 1px, transparent 1px);
         background-size: 100% 100%, 40px 40px, 40px 40px;
       }
-
       html:not(.dark) body {
         background-color: #F8FAFC;
         color: #0F172A;
@@ -75,33 +70,25 @@
           linear-gradient(90deg, rgba(226, 232, 240, 0.5) 1px, transparent 1px);
         background-size: 100% 100%, 40px 40px, 40px 40px;
       }
-
-      /* Tipografia do Artigo - Adaptável */
       .article-content p { margin-bottom: 1.75rem; line-height: 1.9; font-size: 1.15rem; }
       html.dark .article-content p { color: #9AA4AF; }
       html:not(.dark) .article-content p { color: #475569; }
-
       .article-content h2 { margin-top: 3.5rem; margin-bottom: 1.5rem; font-weight: 800; font-size: 2.25rem; letter-spacing: -0.03em; border-left: 4px solid #00E5FF; padding-left: 1.5rem; }
       html.dark .article-content h2 { color: #F5F7FA; }
       html:not(.dark) .article-content h2 { color: #0F172A; border-left-color: #6C5CE7; }
-
       .article-content h3 { margin-top: 2.5rem; margin-bottom: 1.25rem; font-weight: 700; font-size: 1.75rem; color: #6C5CE7; }
-      
       .article-content ul { list-style-type: none; padding-left: 0; margin-bottom: 1.75rem; }
       .article-content li { margin-bottom: 0.85rem; position: relative; padding-left: 2rem; font-size: 1.1rem; }
       html.dark .article-content li { color: #9AA4AF; }
       html:not(.dark) .article-content li { color: #475569; }
       .article-content li::before { content: '→'; position: absolute; left: 0; color: #00E5FF; font-weight: 900; }
-      
       .article-content strong { font-weight: 700; }
       html.dark .article-content strong { color: #F5F7FA; }
       html:not(.dark) .article-content strong { color: #1E293B; }
-      
       ::-webkit-scrollbar { width: 8px; }
       ::-webkit-scrollbar-track { background: transparent; }
       html.dark ::-webkit-scrollbar-thumb { background: #1C222B; border-radius: 4px; border: 2px solid #0B0F14; }
       html:not(.dark) ::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 4px; border: 2px solid #F8FAFC; }
-
       ::selection { background-color: #00E5FF; color: #0B0F14; }
     </style>
     <script type="importmap">
@@ -111,12 +98,15 @@
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
     "react-router-dom": "https://esm.sh/react-router-dom@^7.12.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
+    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.3.1"
   }
 }
 </script>
   </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

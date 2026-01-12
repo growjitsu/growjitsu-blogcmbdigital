@@ -1,12 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 
-interface LayoutProps {
-  children: React.ReactNode;
-}
-
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+const Layout: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isDark, setIsDark] = useState(true);
   const location = useLocation();
@@ -21,8 +16,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   }, [isDark]);
 
-  // Fecha o menu mobile e rola para o topo em cada mudança de página
-  // Isso resolve o problema de clicar em links do rodapé e continuar no final da página
   useEffect(() => {
     setIsMenuOpen(false);
     window.scrollTo(0, 0);
@@ -122,7 +115,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </header>
 
       <main className="flex-grow">
-        {children}
+        <Outlet />
       </main>
 
       {/* Rodapé */}

@@ -1,12 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { Article, Category } from '../types';
 
 const AdminDashboard: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [drafts, setDrafts] = useState<Article[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
+  const [sources, setSources] = useState<any[]>([]);
 
   useEffect(() => {
     const savedDrafts = localStorage.getItem('cmb_drafts');
@@ -18,46 +18,79 @@ const AdminDashboard: React.FC = () => {
   const generateDailyPosts = async () => {
     setIsGenerating(true);
     setLogs([]);
+    setSources([]);
     addLog("Iniciando varredura de tendências globais...");
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      // 1. Pesquisa e Redação
-      const response = await ai.models.generateContent({
+      // ETAPA 1: Pesquisa via Google Search Grounding
+      // Nota: Não pedimos JSON aqui para evitar erros de parsing causados por metadados de grounding.
+      const researchResponse = await ai.models.generateContent({
         model: 'gemini-3-pro-preview',
-        contents: `Aja como um editor-chefe senior da CMBDIGITAL. 
-        Utilize a ferramenta Google Search para encontrar as 3 notícias ou tendências mais importantes e REAIS de hoje nas áreas de: Inteligência Artificial, Marketing Digital e Produtividade Tecnológica.
-        
-        Para cada uma das 3 tendências, crie um artigo completo entre 1000 e 1500 palavras.
-        O formato de saída deve ser um JSON válido contendo um array de objetos com:
-        id, slug, title, excerpt, content (HTML rico), category (use as categorias: Inteligência Artificial, Tecnologia, Marketing Digital, Produtividade, Renda Online, Ferramentas), date (Hoje), tags (array), metaTitle, metaDescription.
-        
-        Não gere conteúdo genérico. Use fatos reais encontrados na busca.`,
+        contents: `Identifique as 3 tendências mais importantes de hoje em Inteligência Artificial, Marketing Digital e Tecnologia. Forneça fatos específicos.`,
         config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json"
+          tools: [{ googleSearch: {} }]
         }
       });
 
-      const generatedArticles = JSON.parse(response.text);
-      addLog("Artigos redigidos com sucesso. Iniciando geração de imagens...");
+      // Extrair links de grounding (obrigatório pelas diretrizes)
+      const groundingChunks = researchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      if (groundingChunks) setSources(groundingChunks);
 
-      // 2. Geração de Imagens para cada artigo
+      addLog("Tendências identificadas. Iniciando redação estruturada...");
+
+      // ETAPA 2: Redação Estruturada em JSON (sem ferramentas para garantir parsing seguro)
+      const generationResponse = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: `Com base nestas tendências: "${researchResponse.text}", crie 3 artigos completos para o blog CMBDIGITAL. 
+        Retorne um array JSON com: id, slug, title, excerpt, content (HTML rico), category, date (Hoje), tags (array), metaTitle, metaDescription.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                slug: { type: Type.STRING },
+                title: { type: Type.STRING },
+                excerpt: { type: Type.STRING },
+                content: { type: Type.STRING },
+                category: { type: Type.STRING },
+                date: { type: Type.STRING },
+                tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                metaTitle: { type: Type.STRING },
+                metaDescription: { type: Type.STRING }
+              },
+              required: ["id", "slug", "title", "excerpt", "content", "category", "date", "tags", "metaTitle", "metaDescription"]
+            }
+          }
+        }
+      });
+
+      const generatedArticles = JSON.parse(generationResponse.text);
+      addLog("Conteúdo redigido. Gerando visuais de alta performance...");
+
+      // ETAPA 3: Geração de Imagens (Nano Banana)
       const articlesWithImages = await Promise.all(generatedArticles.map(async (art: any) => {
-        addLog(`Gerando visual chic para: ${art.title.substring(0, 30)}...`);
+        addLog(`Gerando visual para: ${art.title.substring(0, 30)}...`);
         
         const imgResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
-            parts: [{ text: `A professional, elegant, and chic high-quality photograph for a tech blog article titled: "${art.title}". Style: Minimalist, futuristic, clean, navy blue and white tones, cinematic lighting, 8k resolution. No text in image.` }]
+            parts: [{ text: `A professional, minimalist high-quality tech photograph for: "${art.title}". Navy blue tones, 8k resolution. No text.` }]
           }
         });
 
         let imageUrl = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=1200";
-        for (const part of imgResponse.candidates[0].content.parts) {
-          if (part.inlineData) {
-            imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+        // Correção: Iterar todas as partes para encontrar a imagem
+        if (imgResponse.candidates?.[0]?.content?.parts) {
+          for (const part of imgResponse.candidates[0].content.parts) {
+            if (part.inlineData) {
+              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              break;
+            }
           }
         }
 
@@ -67,11 +100,11 @@ const AdminDashboard: React.FC = () => {
       const newDrafts = [...drafts, ...articlesWithImages];
       setDrafts(newDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(newDrafts));
-      addLog("Protocolo concluído. 3 posts aguardando sua aprovação.");
+      addLog("Protocolo concluído. Rascunhos disponíveis.");
 
     } catch (error) {
       console.error(error);
-      addLog("Erro no protocolo: Verifique sua conexão e chave de API.");
+      addLog("Erro no protocolo: Verifique sua conexão e chave.");
     } finally {
       setIsGenerating(false);
     }
@@ -80,18 +113,13 @@ const AdminDashboard: React.FC = () => {
   const publishArticle = (id: string) => {
     const articleToPublish = drafts.find(d => d.id === id);
     if (!articleToPublish) return;
-
-    // Adiciona aos artigos publicados (LocalStorage para simular DB)
     const published = JSON.parse(localStorage.getItem('cmb_published') || '[]');
     localStorage.setItem('cmb_published', JSON.stringify([...published, { ...articleToPublish, status: 'published' }]));
-    
-    // Remove dos rascunhos
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    
-    alert("Artigo publicado com sucesso no fluxo principal!");
-    window.location.reload(); // Recarrega para atualizar o feed
+    alert("Publicado com sucesso!");
+    window.location.reload();
   };
 
   const deleteDraft = (id: string) => {
@@ -115,16 +143,28 @@ const AdminDashboard: React.FC = () => {
             disabled={isGenerating}
             className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite text-brand-muted cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}
           >
-            {isGenerating ? 'Processando Redação & Visual...' : 'Acionar Varredura Diária'}
+            {isGenerating ? 'Processando Protocolo...' : 'Acionar Varredura Diária'}
           </button>
         </div>
 
-        {/* Logs Console */}
+        {/* Fontes de Grounding */}
+        {sources.length > 0 && (
+          <div className="mb-8 p-6 rounded-2xl border dark:bg-brand-graphite/20 dark:border-brand-graphite border-slate-200">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple mb-4">Fontes Identificadas</h4>
+            <div className="flex flex-wrap gap-4">
+              {sources.map((chunk, idx) => chunk.web && (
+                <a key={idx} href={chunk.web.uri} target="_blank" rel="noopener noreferrer" className="text-xs dark:text-brand-muted text-slate-500 hover:text-brand-cyan underline">
+                  {chunk.web.title || chunk.web.uri}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="mb-20 p-8 rounded-[2rem] border dark:bg-brand-graphite dark:border-brand-graphite/50 dark:text-brand-cyan text-slate-600 bg-white border-slate-200 font-mono text-xs space-y-2">
-          {logs.length === 0 ? '> Sistema em standby. Aguardando comando...' : logs.map((log, i) => <div key={i}>{log}</div>)}
+          {logs.length === 0 ? '> Sistema em standby.' : logs.map((log, i) => <div key={i}>{log}</div>)}
         </div>
 
-        {/* Rascunhos para Aprovação */}
         <div className="space-y-12">
           <h2 className="text-2xl font-black uppercase tracking-widest dark:text-brand-soft text-slate-900 border-b pb-6 dark:border-brand-graphite border-slate-200">
             Fila de Aprovação ({drafts.length})
@@ -132,7 +172,7 @@ const AdminDashboard: React.FC = () => {
           
           {drafts.length === 0 ? (
             <div className="py-20 text-center border-2 border-dashed rounded-[3rem] dark:border-brand-graphite border-slate-200">
-               <p className="text-brand-muted font-bold uppercase tracking-widest text-sm">Nenhum rascunho pendente de validação.</p>
+               <p className="text-brand-muted font-bold uppercase tracking-widest text-sm">Nenhum rascunho pendente.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-10">
@@ -146,18 +186,8 @@ const AdminDashboard: React.FC = () => {
                     <h3 className="text-3xl font-black mb-6 tracking-tighter dark:text-brand-soft text-slate-900">{draft.title}</h3>
                     <p className="text-brand-muted mb-10 line-clamp-2">{draft.excerpt}</p>
                     <div className="flex flex-wrap gap-4">
-                      <button 
-                        onClick={() => publishArticle(draft.id)}
-                        className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all"
-                      >
-                        Aprovar e Publicar
-                      </button>
-                      <button 
-                        onClick={() => deleteDraft(draft.id)}
-                        className="bg-red-500/10 text-red-500 px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all"
-                      >
-                        Descartar
-                      </button>
+                      <button onClick={() => publishArticle(draft.id)} className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">Publicar</button>
+                      <button onClick={() => deleteDraft(draft.id)} className="bg-red-500/10 text-red-500 px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Descartar</button>
                     </div>
                   </div>
                 </div>
