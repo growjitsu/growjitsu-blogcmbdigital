@@ -1,8 +1,5 @@
 {
   "name": "CMBDIGITAL Blog",
   "description": "A premium, SEO-optimized blog focusing on AI, technology, digital marketing, and productivity. Designed for authority, credibility, and high-value content.",
-  "requestFramePermissions": [
-    "camera",
-    "microphone"
-  ]
+  "requestFramePermissions": []
 }

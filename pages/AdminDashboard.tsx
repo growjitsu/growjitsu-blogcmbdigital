@@ -21,7 +21,6 @@ const AdminDashboard: React.FC = () => {
   const [sources, setSources] = useState<any[]>([]);
 
   useEffect(() => {
-    // 1. Verificar sessão ativa imediatamente no carregamento
     const checkInitialSession = async () => {
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
@@ -35,7 +34,6 @@ const AdminDashboard: React.FC = () => {
 
     checkInitialSession();
 
-    // 2. Escutar mudanças de estado (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
       if (session) {
@@ -43,7 +41,6 @@ const AdminDashboard: React.FC = () => {
       }
     });
 
-    // 3. Carregar rascunhos locais
     const savedDrafts = localStorage.getItem('cmb_drafts');
     if (savedDrafts) setDrafts(JSON.parse(savedDrafts));
 
@@ -56,22 +53,18 @@ const AdminDashboard: React.FC = () => {
     setLoginError('');
 
     try {
-      // OBRIGATÓRIO: Uso exclusivo de signInWithPassword para usuários existentes
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password: password,
       });
 
       if (error) {
-        // Log detalhado para diagnóstico no console do desenvolvedor
-        console.error("Erro detalhado do Supabase:", error);
+        console.error("Erro Supabase:", error);
         throw error;
       }
-      
-      console.log("Conexão estabelecida com sucesso para:", data.user?.email);
+      console.log("Login OK:", data.user?.email);
     } catch (error: any) {
-      // Exibe a mensagem real do erro (Ex: "Email not confirmed" ou "Invalid login credentials")
-      setLoginError(error.message || 'Falha na autenticação com o servidor central.');
+      setLoginError(error.message || 'Falha na autenticação.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -84,17 +77,23 @@ const AdminDashboard: React.FC = () => {
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-5));
 
   const generateDailyPosts = async () => {
+    if (!process.env.API_KEY) {
+      addLog("ERRO: Chave API não configurada no ambiente.");
+      return;
+    }
+
     setIsGenerating(true);
     setLogs([]);
     setSources([]);
-    addLog("Iniciando varredura de tendências globais...");
+    addLog("Iniciando varredura de tendências globais (Search Grounding)...");
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
+      // FASE 1: PESQUISA REAL-TIME
       const researchResponse = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `Identifique as 3 tendências mais importantes de hoje em Inteligência Artificial, Marketing Digital e Tecnologia no Brasil. Forneça fatos específicos.`,
+        model: 'gemini-3-flash-preview',
+        contents: "Identifique as 3 notícias/tendências mais impactantes de hoje (Tecnologia, IA e Marketing Digital no Brasil). Seja específico com nomes de empresas e ferramentas.",
         config: {
           tools: [{ googleSearch: {} }]
         }
@@ -103,12 +102,14 @@ const AdminDashboard: React.FC = () => {
       const groundingChunks = researchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks;
       if (groundingChunks) setSources(groundingChunks);
 
-      addLog("Tendências identificadas. Iniciando redação estruturada...");
+      addLog("Análise de tendências concluída. Redigindo artigos SEO...");
 
+      // FASE 2: GERAÇÃO DE CONTEÚDO ESTRUTURADO
       const generationResponse = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: `Com base nestas tendências: "${researchResponse.text}", crie 3 artigos completos para o blog CMBDIGITAL em português brasileiro. 
-        Retorne um array JSON com: id, slug, title, excerpt, content (HTML rico com h2, h3, p, strong, ul, li), category, date (Hoje), tags (array), metaTitle, metaDescription.`,
+        model: 'gemini-3-flash-preview',
+        contents: `Com base nas tendências atuais: "${researchResponse.text}", crie exatamente 3 artigos para o blog CMBDIGITAL. 
+        O tom deve ser premium, técnico e de autoridade. 
+        Retorne um array JSON com: id, slug, title, excerpt, content (HTML rico), category, date (ex: "24 de Maio, 2025"), tags (array), metaTitle, metaDescription.`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -133,16 +134,17 @@ const AdminDashboard: React.FC = () => {
         }
       });
 
-      const generatedArticles = JSON.parse(generationResponse.text);
-      addLog("Conteúdo redigido. Gerando visuais de alta performance...");
+      const generatedArticles = JSON.parse(generationResponse.text || "[]");
+      addLog("Textos finalizados. Iniciando síntese visual de alta performance...");
 
+      // FASE 3: GERAÇÃO DE IMAGENS
       const articlesWithImages = await Promise.all(generatedArticles.map(async (art: any) => {
-        addLog(`Gerando visual para: ${art.title.substring(0, 30)}...`);
+        addLog(`Sintetizando imagem para: ${art.title.substring(0, 20)}...`);
         
         const imgResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
-            parts: [{ text: `A professional, minimalist high-quality tech photograph for: "${art.title}". Corporate tech style, navy blue and cyan tones, 8k resolution. No text.` }]
+            parts: [{ text: `Professional, minimalist high-tech corporate photograph for article titled: "${art.title}". Tech noir aesthetic, obsidian and cyan lighting, hyper-realistic, 8k resolution, no text, no logos.` }]
           }
         });
 
@@ -156,17 +158,26 @@ const AdminDashboard: React.FC = () => {
           }
         }
 
-        return { ...art, image: imageUrl, author: 'CMBDIGITAL', status: 'draft' };
+        return { 
+          ...art, 
+          image: imageUrl, 
+          author: 'CMBDIGITAL', 
+          status: 'draft',
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}` // ID Único
+        };
       }));
 
       const newDrafts = [...drafts, ...articlesWithImages];
       setDrafts(newDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(newDrafts));
-      addLog("Protocolo concluído. Rascunhos disponíveis.");
+      addLog("Protocolo concluído com sucesso.");
 
-    } catch (error) {
-      console.error(error);
-      addLog("Erro no protocolo: Verifique sua conexão e chave de API.");
+    } catch (error: any) {
+      console.error("Erro na geração:", error);
+      const errorMsg = error.message?.includes('403') || error.message?.includes('key') 
+        ? "Erro de API: Verifique se sua GEMINI_API_KEY é válida e tem acesso ao modelo." 
+        : `Erro operacional: ${error.message || "Falha na conexão com Gemini"}`;
+      addLog(errorMsg);
     } finally {
       setIsGenerating(false);
     }
@@ -176,11 +187,11 @@ const AdminDashboard: React.FC = () => {
     const articleToPublish = drafts.find(d => d.id === id);
     if (!articleToPublish) return;
     const published = JSON.parse(localStorage.getItem('cmb_published') || '[]');
-    localStorage.setItem('cmb_published', JSON.stringify([...published, { ...articleToPublish, status: 'published' }]));
+    localStorage.setItem('cmb_published', JSON.stringify([{ ...articleToPublish, status: 'published' }, ...published]));
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    alert("Publicado com sucesso!");
+    alert("Protocolo publicado no hub principal.");
     window.location.reload();
   };
 
@@ -190,7 +201,6 @@ const AdminDashboard: React.FC = () => {
     localStorage.setItem('cmb_drafts', JSON.stringify(remaining));
   };
 
-  // ESTADO DE CARREGAMENTO INICIAL
   if (isAuthenticated === null) {
     return (
       <div className="min-h-screen flex items-center justify-center dark:bg-brand-obsidian bg-brand-lightBg">
@@ -199,39 +209,33 @@ const AdminDashboard: React.FC = () => {
     );
   }
 
-  // TELA DE LOGIN (SUPABASE AUTH)
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center dark:bg-brand-obsidian bg-brand-lightBg px-4 py-20">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-brand-purple/5 rounded-full blur-[120px]"></div>
-          <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-brand-cyan/5 rounded-full blur-[100px]"></div>
-        </div>
-
         <div className="w-full max-w-md relative z-10">
           <div className="text-center mb-12">
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-brand-cyan mb-8 shadow-2xl shadow-brand-cyan/20">
               <span className="text-brand-obsidian font-black text-3xl">C</span>
             </div>
-            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4 uppercase">Área do Curador</h1>
-            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Autenticação via Supabase Central</p>
+            <h1 className="text-4xl font-black tracking-tighter dark:text-brand-soft text-slate-900 mb-4 uppercase">Portal do Curador</h1>
+            <p className="text-brand-muted font-bold uppercase tracking-[0.2em] text-[10px]">Autenticação de Segurança Supabase</p>
           </div>
 
           <form onSubmit={handleLogin} className="p-10 rounded-[3rem] border dark:bg-brand-graphite dark:border-brand-graphite bg-white border-slate-200 shadow-2xl">
             {loginError && (
-              <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-xs font-bold text-center leading-relaxed">
+              <div className="mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-500 text-xs font-bold text-center">
                 {loginError}
               </div>
             )}
             
             <div className="space-y-8">
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">E-mail de Acesso</label>
+                <label className="block text-[10px] font-black uppercase tracking-[0.3em] mb-4 dark:text-brand-muted text-slate-500">Credencial de E-mail</label>
                 <input 
                   type="email" 
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan focus:ring-0 transition-all"
+                  className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan outline-none transition-all"
                   placeholder="admin@cmbdigital.com"
                   required
                 />
@@ -242,7 +246,7 @@ const AdminDashboard: React.FC = () => {
                   type="password" 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan focus:ring-0 transition-all"
+                  className="w-full border rounded-2xl px-6 py-4 font-bold tracking-tight dark:bg-brand-obsidian dark:border-brand-graphite dark:text-brand-soft bg-slate-50 border-slate-100 text-slate-900 focus:border-brand-cyan outline-none transition-all"
                   placeholder="••••••••"
                   required
                 />
@@ -252,55 +256,48 @@ const AdminDashboard: React.FC = () => {
                 disabled={isLoggingIn}
                 className={`w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black text-xs uppercase tracking-[0.4em] transition-all shadow-xl shadow-brand-cyan/10 ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : 'hover:bg-brand-purple hover:text-white'}`}
               >
-                {isLoggingIn ? 'Verificando...' : 'Sincronizar Credenciais'}
+                {isLoggingIn ? 'Verificando...' : 'Iniciar Protocolo'}
               </button>
             </div>
           </form>
-          
-          <p className="mt-12 text-center text-[10px] font-bold dark:text-brand-muted text-slate-400 tracking-[0.2em] leading-loose">
-            PROJETO: QGWGVT... <br/>
-            SISTEMA DE SEGURANÇA SUPABASE &copy; 2025
-          </p>
         </div>
       </div>
     );
   }
 
-  // DASHBOARD AUTENTICADO
   return (
     <div className="min-h-screen pt-32 pb-20 dark:bg-brand-obsidian bg-brand-lightBg">
       <div className="container mx-auto px-4 max-w-6xl">
         <div className="flex flex-col md:flex-row justify-between items-start mb-16 gap-10">
           <div>
             <h1 className="text-5xl font-black tracking-tighter mb-4 dark:text-brand-soft text-slate-900 uppercase">
-              Centro de <span className="text-brand-cyan">Curação Automática</span>
+              Centro de <span className="text-brand-cyan">Curação</span>
             </h1>
-            <p className="text-brand-muted font-medium">Motor de inteligência CMBDIGITAL v2.0</p>
+            <p className="text-brand-muted font-medium">IA Engine v3.0 (Grounding Ativo)</p>
           </div>
           <div className="flex gap-4">
             <button 
               onClick={handleLogout}
               className="px-6 py-5 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] transition-all border dark:border-brand-graphite dark:text-brand-muted hover:border-red-500 hover:text-red-500"
             >
-              Log Out
+              Sair
             </button>
             <button 
               onClick={generateDailyPosts}
               disabled={isGenerating}
-              className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite text-brand-muted cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}
+              className={`px-10 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite text-brand-muted cursor-not-allowed animate-pulse' : 'bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white'}`}
             >
-              {isGenerating ? 'Processando Protocolo...' : 'Acionar Varredura Diária'}
+              {isGenerating ? 'Processando...' : 'Adicionar Varredura'}
             </button>
           </div>
         </div>
 
-        {/* Fontes de Grounding */}
         {sources.length > 0 && (
           <div className="mb-8 p-6 rounded-2xl border dark:bg-brand-graphite/20 dark:border-brand-graphite border-slate-200">
-            <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple mb-4">Fontes Identificadas</h4>
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple mb-4">Fontes Identificadas pelo Google Search</h4>
             <div className="flex flex-wrap gap-4">
               {sources.map((chunk, idx) => chunk.web && (
-                <a key={idx} href={chunk.web.uri} target="_blank" rel="noopener noreferrer" className="text-xs dark:text-brand-muted text-slate-500 hover:text-brand-cyan underline">
+                <a key={idx} href={chunk.web.uri} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold dark:text-brand-muted text-slate-500 hover:text-brand-cyan underline uppercase">
                   {chunk.web.title || chunk.web.uri}
                 </a>
               ))}
@@ -309,12 +306,12 @@ const AdminDashboard: React.FC = () => {
         )}
 
         <div className="mb-20 p-8 rounded-[2rem] border dark:bg-brand-graphite dark:border-brand-graphite/50 dark:text-brand-cyan text-slate-600 bg-white border-slate-200 font-mono text-xs space-y-2">
-          {logs.length === 0 ? '> Sistema em standby.' : logs.map((log, i) => <div key={i}>{log}</div>)}
+          {logs.length === 0 ? '> Pronto para novas tarefas.' : logs.map((log, i) => <div key={i}>{log}</div>)}
         </div>
 
         <div className="space-y-12">
           <h2 className="text-2xl font-black uppercase tracking-widest dark:text-brand-soft text-slate-900 border-b pb-6 dark:border-brand-graphite border-slate-200">
-            Fila de Aprovação ({drafts.length})
+            Fila de Rascunhos ({drafts.length})
           </h2>
           
           {drafts.length === 0 ? (
@@ -330,10 +327,10 @@ const AdminDashboard: React.FC = () => {
                   </div>
                   <div className="lg:w-2/3 flex flex-col justify-center">
                     <span className="text-brand-purple font-black text-[10px] uppercase tracking-widest mb-4">{draft.category}</span>
-                    <h3 className="text-3xl font-black mb-6 tracking-tighter dark:text-brand-soft text-slate-900">{draft.title}</h3>
+                    <h3 className="text-3xl font-black mb-6 tracking-tighter dark:text-brand-soft text-slate-900 leading-tight">{draft.title}</h3>
                     <p className="text-brand-muted mb-10 line-clamp-2">{draft.excerpt}</p>
                     <div className="flex flex-wrap gap-4">
-                      <button onClick={() => publishArticle(draft.id)} className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">Publicar</button>
+                      <button onClick={() => publishArticle(draft.id)} className="bg-brand-cyan text-brand-obsidian px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg">Publicar Agora</button>
                       <button onClick={() => deleteDraft(draft.id)} className="bg-red-500/10 text-red-500 px-8 py-4 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">Descartar</button>
                     </div>
                   </div>
