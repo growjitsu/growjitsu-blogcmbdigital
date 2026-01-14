@@ -8,6 +8,9 @@ interface ArticleCardProps {
 }
 
 const ArticleCard: React.FC<ArticleCardProps> = ({ article }) => {
+  // Garantia de que sempre haverá uma imagem coerente
+  const safeImage = article.image || `https://images.unsplash.com/featured/?${encodeURIComponent(article.category + "," + article.title.split(' ').slice(0, 2).join(','))}`;
+
   return (
     <article className="group relative rounded-[2rem] overflow-hidden border transition-all duration-500 hover:shadow-2xl dark:bg-brand-graphite dark:border-brand-graphite dark:hover:border-brand-purple/50 bg-white border-slate-200 hover:border-brand-purple/30">
       {/* Glow Effect (Somente Dark) */}
@@ -16,9 +19,14 @@ const ArticleCard: React.FC<ArticleCardProps> = ({ article }) => {
       <Link to={`/artigo/${article.slug}`} className="relative block h-full">
         <div className="relative h-64 overflow-hidden">
           <img 
-            src={article.image} 
+            src={safeImage} 
             alt={article.title} 
+            loading="lazy"
             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000 ease-out"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.src = `https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=800`; // Fallback absoluto de tech
+            }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-80"></div>
           <div className="absolute top-6 left-6">
