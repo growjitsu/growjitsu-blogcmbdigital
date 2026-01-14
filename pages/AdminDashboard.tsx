@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { Article } from '../types';
 
@@ -22,6 +22,7 @@ const AdminDashboard: React.FC = () => {
   // Estado para Edição Manual
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -105,6 +106,51 @@ const AdminDashboard: React.FC = () => {
     addLog("Alterações salvas no rascunho.");
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingArticle) return;
+
+    // Validações
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Arquivo muito grande. Limite: 2MB.");
+      return;
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      alert("Formato não suportado. Use JPG, PNG ou WEBP.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      
+      // Validação de Proporção (Opcional, mas solicitada no prompt)
+      const img = new Image();
+      img.onload = () => {
+        const ratio = img.width / img.height;
+        const targetRatio = 16 / 9;
+        const tolerance = 0.1;
+        
+        if (Math.abs(ratio - targetRatio) > tolerance) {
+          if (!confirm("A imagem não está na proporção 16:9 recomendada (1200x675). Deseja continuar mesmo assim?")) {
+            return;
+          }
+        }
+        
+        setEditingArticle({ 
+          ...editingArticle, 
+          image: base64, 
+          image_source: 'upload' 
+        });
+        addLog("Upload manual concluído com sucesso.");
+      };
+      img.src = base64;
+    };
+    reader.readAsDataURL(file);
+  };
+
   const regenerateImage = async () => {
     if (!editingArticle) return;
     setIsRegeneratingImage(true);
@@ -121,7 +167,11 @@ const AdminDashboard: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        setEditingArticle({ ...editingArticle, image: data.image });
+        setEditingArticle({ 
+          ...editingArticle, 
+          image: data.image, 
+          image_source: 'ai' 
+        });
         addLog("Nova imagem gerada com sucesso.");
       } else {
         throw new Error(data.error);
@@ -186,8 +236,13 @@ const AdminDashboard: React.FC = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 overflow-y-auto">
             <div className="bg-brand-graphite w-full max-w-4xl p-8 md:p-12 rounded-[3rem] border border-brand-graphite shadow-2xl space-y-8 my-8">
               <div className="flex justify-between items-center">
-                <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Modo de Revisão</h2>
-                <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors">Fechar</button>
+                <div className="flex items-center gap-4">
+                  <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Modo de Revisão</h2>
+                  {editingArticle.image_source === 'upload' && (
+                    <span className="text-[8px] bg-brand-amber/20 text-brand-amber px-2 py-0.5 rounded-full border border-brand-amber/30 uppercase font-black tracking-widest">Upload Manual</span>
+                  )}
+                </div>
+                <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors text-2xl">×</button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -200,28 +255,48 @@ const AdminDashboard: React.FC = () => {
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Subtítulo (Excerpt)</label>
                     <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-24" />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Categoria</label>
-                    <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Categoria</label>
+                      <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Slug</label>
+                      <input type="text" value={editingArticle.slug} onChange={(e) => setEditingArticle({...editingArticle, slug: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
+                    </div>
                   </div>
                 </div>
 
                 <div className="space-y-6">
-                  <div className="rounded-2xl overflow-hidden border border-brand-graphite h-48 bg-brand-obsidian relative group">
+                  <div className="rounded-2xl overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-inner">
                     <img src={editingArticle.image} className="w-full h-full object-cover" alt="Editor" />
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute inset-0 bg-brand-obsidian/80 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-4 p-4">
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full max-w-[200px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                      >
+                        📤 Upload de Imagem
+                      </button>
                       <button 
                         onClick={regenerateImage} 
                         disabled={isRegeneratingImage}
-                        className="bg-brand-cyan text-brand-obsidian px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all"
+                        className="w-full max-w-[200px] bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
                       >
-                        {isRegeneratingImage ? 'Gerando...' : '🔄 Regenerar Imagem'}
+                        {isRegeneratingImage ? 'Gerando...' : '🔄 Regenerar IA'}
                       </button>
+                      <p className="text-[8px] text-brand-muted font-bold uppercase tracking-widest text-center">Recomendado: 1200x675 (16:9)</p>
                     </div>
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      className="hidden" 
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleImageUpload}
+                    />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL da Imagem Personalizada</label>
-                    <input type="text" value={editingArticle.image} onChange={(e) => setEditingArticle({...editingArticle, image: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
+                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL da Imagem / Base64</label>
+                    <input type="text" value={editingArticle.image} onChange={(e) => setEditingArticle({...editingArticle, image: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan text-xs font-mono truncate" />
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags (Separadas por vírgula)</label>
@@ -235,13 +310,13 @@ const AdminDashboard: React.FC = () => {
                 <textarea 
                   value={editingArticle.content} 
                   onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} 
-                  className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-64 font-mono text-sm" 
+                  className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-72 font-mono text-sm leading-relaxed" 
                 />
               </div>
 
-              <div className="flex gap-4 pt-6 border-t border-brand-graphite">
-                <button onClick={saveEdit} className="flex-grow bg-brand-purple text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all">Salvar Revisão</button>
-                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all">Salvar e Publicar Agora</button>
+              <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-brand-graphite">
+                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:border-brand-muted transition-all">Salvar Rascunho</button>
+                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/20">Finalizar & Publicar</button>
               </div>
             </div>
           </div>
@@ -270,7 +345,7 @@ const AdminDashboard: React.FC = () => {
 
           <div className="p-8 rounded-[2.5rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 min-h-[250px] shadow-inner flex flex-col">
             <span className="mb-4 pb-2 border-b border-brand-graphite/30 uppercase font-black opacity-50 tracking-widest">Logs Editoriais</span>
-            <div className="flex-grow">
+            <div className="flex-grow overflow-y-auto max-h-[300px]">
               {logs.length === 0 ? '> Pronto para curadoria...' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
             </div>
           </div>
@@ -286,8 +361,11 @@ const AdminDashboard: React.FC = () => {
             <div className="grid grid-cols-1 gap-10">
               {drafts.map(draft => (
                 <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-10 hover:border-brand-cyan/40 transition-all group">
-                  <div className="md:w-64 h-48 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 bg-brand-obsidian">
+                  <div className="md:w-64 h-48 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 bg-brand-obsidian relative">
                     <img src={draft.image} className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform" alt="Preview" />
+                    {draft.image_source === 'upload' && (
+                      <div className="absolute top-4 right-4 bg-brand-amber text-brand-obsidian px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest shadow-lg">Upload</div>
+                    )}
                   </div>
                   <div className="flex-grow">
                     <div className="flex justify-between items-start mb-4">

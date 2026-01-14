@@ -9,6 +9,7 @@ export interface Article {
   author: string;
   date: string;
   image: string;
+  image_source?: 'ai' | 'upload';
   metaTitle: string;
   metaDescription: string;
   tags: string[];
