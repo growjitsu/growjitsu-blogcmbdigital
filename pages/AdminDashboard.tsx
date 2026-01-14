@@ -64,10 +64,10 @@ const AdminDashboard: React.FC = () => {
   const generateDailyPosts = async () => {
     setIsGenerating(true);
     setLogs([]);
-    addLog("Iniciando Varredura Editorial Direta...");
+    addLog("Iniciando Varredura Neural (Engine: Gemini 3 Flash)...");
 
     try {
-      addLog("Conectando ao motor serverless (Auth: API_KEY)...");
+      addLog("Sincronizando com motor serverless (Protocolo: API_KEY)...");
       
       const response = await fetch('/api/curadoria', {
         method: 'POST',
@@ -81,17 +81,17 @@ const AdminDashboard: React.FC = () => {
       }
 
       const newArticles = data.articles || [];
-      addLog(`Sucesso: ${newArticles.length} rascunhos inéditos gerados.`);
+      addLog(`Sucesso: ${newArticles.length} artigos gerados com integridade JSON.`);
       
       const updatedDrafts = [...newArticles, ...drafts];
       setDrafts(updatedDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
       
-      addLog("CONCLUÍDO: Conteúdo pronto para revisão manual.");
+      addLog("PRONTO: Conteúdo validado e pronto para revisão.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`ERRO: ${error.message}`);
+      addLog(`FALHA: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -158,7 +158,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs">SISTEMA ATIVO: GPT-4o | KEY: PROTEGIDO</p>
+            <p className="text-brand-muted font-mono text-xs">SISTEMA: GEMINI 3 FLASH | AUTH: INTEGRADA</p>
           </div>
           <div className="flex gap-4">
              <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
@@ -167,7 +167,7 @@ const AdminDashboard: React.FC = () => {
               disabled={isGenerating} 
               className={`px-10 py-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-105 shadow-brand-cyan/20'}`}
              >
-               {isGenerating ? 'Varrendo...' : 'Adicionar Varredura'}
+               {isGenerating ? 'Executando...' : 'Adicionar Varredura'}
              </button>
           </div>
         </div>
