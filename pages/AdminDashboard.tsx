@@ -64,7 +64,7 @@ const AdminDashboard: React.FC = () => {
   const generateDailyPosts = async () => {
     setIsGenerating(true);
     setLogs([]);
-    addLog("Iniciando Varredura Editorial (Engine: OpenAI)...");
+    addLog("Iniciando Protocolo de Varredura (Engine: OpenAI)...");
 
     try {
       addLog("Solicitando curadoria ao motor serverless...");
@@ -74,25 +74,30 @@ const AdminDashboard: React.FC = () => {
         headers: { 'Content-Type': 'application/json' }
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Erro na resposta do servidor.");
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("O servidor retornou uma resposta inválida (não-JSON). Verifique os logs da Vercel.");
       }
 
       const data = await response.json();
+
+      if (!response.ok || data.success === false) {
+        throw new Error(data.details || data.error || "Falha na resposta do motor editorial.");
+      }
+
       const newArticles = data.articles || [];
 
-      addLog(`Sucesso: ${newArticles.length} novos rascunhos gerados.`);
+      addLog(`Sucesso: ${newArticles.length} rascunhos inéditos gerados.`);
       
       const updatedDrafts = [...newArticles, ...drafts];
       setDrafts(updatedDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
       
-      addLog("PRONTO: Conteúdo salvo na fila de aprovação.");
+      addLog("CONCLUÍDO: Conteúdo pronto para revisão.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`ERRO: ${error.message}`);
+      addLog(`ERRO CRÍTICO: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -102,7 +107,6 @@ const AdminDashboard: React.FC = () => {
     const articleToPublish = drafts.find(d => d.id === id);
     if (!articleToPublish) return;
     
-    // Converter texto puro para HTML para o blog
     const formattedContent = articleToPublish.content
       .split('\n\n')
       .map(p => `<p>${p.trim()}</p>`)
@@ -160,7 +164,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs">SISTEMA: OPENAI GPT-4o | STATUS: {isGenerating ? 'EXECUTANDO...' : 'OPERACIONAL'}</p>
+            <p className="text-brand-muted font-mono text-xs">OPENAI GPT-4o | STATUS: {isGenerating ? 'EXECUTANDO...' : 'OPERACIONAL'}</p>
           </div>
           <div className="flex gap-4">
              <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
@@ -174,12 +178,10 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Terminal de Logs */}
         <div className="mb-12 p-8 rounded-[2rem] bg-black/40 border border-brand-graphite/50 font-mono text-[11px] text-brand-cyan/80 min-h-[200px] shadow-inner">
           {logs.length === 0 ? '> Terminal pronto. Clique em "Adicionar Varredura" para iniciar.' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
         </div>
 
-        {/* Fila de Publicação */}
         <div className="space-y-10">
           <div className="flex items-center justify-between border-b border-brand-graphite pb-8">
             <h2 className="text-2xl font-black uppercase tracking-widest">Fila de Rascunhos ({drafts.length})</h2>
