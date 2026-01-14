@@ -22,6 +22,7 @@ const AdminDashboard: React.FC = () => {
   // Estado para Edição Manual
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -103,58 +104,64 @@ const AdminDashboard: React.FC = () => {
     setDrafts(updatedDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
     setEditingArticle(null);
-    addLog("Alterações salvas no rascunho.");
+    addLog("Alterações salvas e persistidas localmente.");
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editingArticle) return;
 
-    // Validações
+    // Validações de Cliente
     if (file.size > 2 * 1024 * 1024) {
-      alert("Arquivo muito grande. Limite: 2MB.");
+      alert("Erro: O arquivo excede 2MB.");
       return;
     }
 
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      alert("Formato não suportado. Use JPG, PNG ou WEBP.");
-      return;
-    }
+    setIsUploading(true);
+    addLog(`Iniciando upload físico: ${file.name}...`);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      
-      // Validação de Proporção (Opcional, mas solicitada no prompt)
-      const img = new Image();
-      img.onload = () => {
-        const ratio = img.width / img.height;
-        const targetRatio = 16 / 9;
-        const tolerance = 0.1;
-        
-        if (Math.abs(ratio - targetRatio) > tolerance) {
-          if (!confirm("A imagem não está na proporção 16:9 recomendada (1200x675). Deseja continuar mesmo assim?")) {
-            return;
-          }
-        }
-        
-        setEditingArticle({ 
-          ...editingArticle, 
-          image: base64, 
-          image_source: 'upload' 
+    try {
+      // Gerar nome único profissional
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${editingArticle.slug || 'post'}-${Date.now()}.${fileExt}`;
+      const filePath = `posts/${fileName}`;
+
+      // Upload para Supabase Storage
+      const { data, error: uploadError } = await supabase.storage
+        .from('blog-images') // Certifique-se que o bucket 'blog-images' existe e é público
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
         });
-        addLog("Upload manual concluído com sucesso.");
-      };
-      img.src = base64;
-    };
-    reader.readAsDataURL(file);
+
+      if (uploadError) throw uploadError;
+
+      // Obter URL Pública
+      const { data: { publicUrl } } = supabase.storage
+        .from('blog-images')
+        .getPublicUrl(filePath);
+
+      setEditingArticle({ 
+        ...editingArticle, 
+        image: publicUrl, 
+        image_source: 'upload' 
+      });
+      
+      addLog("Upload concluído. URL persistente gerada.");
+      
+    } catch (error: any) {
+      console.error("Erro no Storage:", error);
+      addLog(`Erro no upload: ${error.message}`);
+      alert("Falha ao salvar imagem no servidor. Verifique as permissões do Bucket.");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const regenerateImage = async () => {
     if (!editingArticle) return;
     setIsRegeneratingImage(true);
-    addLog("Regenerando imagem baseada no título atual...");
+    addLog("Regenerando imagem via IA (Protocolo Único)...");
     try {
       const response = await fetch('/api/curadoria', {
         method: 'POST',
@@ -172,7 +179,7 @@ const AdminDashboard: React.FC = () => {
           image: data.image, 
           image_source: 'ai' 
         });
-        addLog("Nova imagem gerada com sucesso.");
+        addLog("Nova imagem de IA vinculada.");
       } else {
         throw new Error(data.error);
       }
@@ -184,15 +191,25 @@ const AdminDashboard: React.FC = () => {
   };
 
   const publishArticle = (id: string) => {
-    const articleToPublish = drafts.find(d => d.id === id);
+    // Se estiver editando, salvar antes de publicar
+    if (editingArticle && editingArticle.id === id) {
+      saveEdit();
+    }
+    
+    const articleToPublish = drafts.find(d => d.id === id) || (editingArticle?.id === id ? editingArticle : null);
     if (!articleToPublish) return;
+
     const published = JSON.parse(localStorage.getItem('cmb_published') || '[]');
-    localStorage.setItem('cmb_published', JSON.stringify([{ ...articleToPublish, status: 'published' }, ...published]));
+    const newPublished = [{ ...articleToPublish, status: 'published' }, ...published];
+    localStorage.setItem('cmb_published', JSON.stringify(newPublished));
+    
     const remainingDrafts = drafts.filter(d => d.id !== id);
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
-    addLog("ARTIGO PUBLICADO NO HUB.");
+    
+    addLog("SUCESSO: Artigo publicado com URL persistente.");
     alert("Publicado com sucesso!");
+    if (editingArticle?.id === id) setEditingArticle(null);
   };
 
   const deleteDraft = (id: string) => {
@@ -226,23 +243,31 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2 text-white">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Controle Editorial Manual Ativado</p>
+            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Sincronização com Storage Ativa</p>
           </div>
           <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
         </div>
 
         {/* MODAL DE EDIÇÃO */}
         {editingArticle && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 overflow-y-auto">
-            <div className="bg-brand-graphite w-full max-w-4xl p-8 md:p-12 rounded-[3rem] border border-brand-graphite shadow-2xl space-y-8 my-8">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 overflow-y-auto">
+            <div className="bg-brand-graphite w-full max-w-4xl p-8 md:p-12 rounded-[3rem] border border-brand-graphite shadow-2xl space-y-8 my-8 relative">
+              
+              {isUploading && (
+                <div className="absolute inset-0 bg-brand-obsidian/80 z-[110] flex flex-col items-center justify-center rounded-[3rem]">
+                  <div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
+                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan">Persistindo Imagem no Storage...</p>
+                </div>
+              )}
+
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-4">
-                  <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Modo de Revisão</h2>
+                  <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Revisão Editorial</h2>
                   {editingArticle.image_source === 'upload' && (
-                    <span className="text-[8px] bg-brand-amber/20 text-brand-amber px-2 py-0.5 rounded-full border border-brand-amber/30 uppercase font-black tracking-widest">Upload Manual</span>
+                    <span className="text-[8px] bg-brand-cyan/20 text-brand-cyan px-2 py-0.5 rounded-full border border-brand-cyan/30 uppercase font-black tracking-widest">Imagem Persistida</span>
                   )}
                 </div>
-                <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors text-2xl">×</button>
+                <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors text-3xl">×</button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -261,30 +286,29 @@ const AdminDashboard: React.FC = () => {
                       <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Slug</label>
+                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Slug (URL)</label>
                       <input type="text" value={editingArticle.slug} onChange={(e) => setEditingArticle({...editingArticle, slug: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
                     </div>
                   </div>
                 </div>
 
                 <div className="space-y-6">
-                  <div className="rounded-2xl overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-inner">
+                  <div className="rounded-2xl overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-2xl">
                     <img src={editingArticle.image} className="w-full h-full object-cover" alt="Editor" />
                     <div className="absolute inset-0 bg-brand-obsidian/80 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-4 p-4">
                       <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="w-full max-w-[200px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                        className="w-full max-w-[220px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
                       >
-                        📤 Upload de Imagem
+                        📤 Upload Manual (Storage)
                       </button>
                       <button 
                         onClick={regenerateImage} 
                         disabled={isRegeneratingImage}
-                        className="w-full max-w-[200px] bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                        className="w-full max-w-[220px] bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
                       >
-                        {isRegeneratingImage ? 'Gerando...' : '🔄 Regenerar IA'}
+                        {isRegeneratingImage ? 'Regenerando...' : '🔄 Regenerar via IA'}
                       </button>
-                      <p className="text-[8px] text-brand-muted font-bold uppercase tracking-widest text-center">Recomendado: 1200x675 (16:9)</p>
                     </div>
                     <input 
                       type="file" 
@@ -295,28 +319,29 @@ const AdminDashboard: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL da Imagem / Base64</label>
-                    <input type="text" value={editingArticle.image} onChange={(e) => setEditingArticle({...editingArticle, image: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan text-xs font-mono truncate" />
+                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL Pública da Imagem</label>
+                    <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-xs font-mono truncate cursor-not-allowed" />
+                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase">Status: Persistida em Supabase Storage</p>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags (Separadas por vírgula)</label>
+                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags</label>
                     <input type="text" value={editingArticle.tags.join(', ')} onChange={(e) => setEditingArticle({...editingArticle, tags: e.target.value.split(',').map(t => t.trim())})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Conteúdo do Artigo (HTML/Markdown)</label>
+                <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Corpo do Artigo</label>
                 <textarea 
                   value={editingArticle.content} 
                   onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} 
-                  className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-72 font-mono text-sm leading-relaxed" 
+                  className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-64 font-mono text-sm leading-relaxed" 
                 />
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-brand-graphite">
-                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:border-brand-muted transition-all">Salvar Rascunho</button>
-                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/20">Finalizar & Publicar</button>
+                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:border-brand-muted transition-all">Salvar Revisão</button>
+                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-2xl">Aprovar & Publicar Agora</button>
               </div>
             </div>
           </div>
@@ -325,46 +350,45 @@ const AdminDashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 mb-12">
           <div className="lg:col-span-2 space-y-8">
             <div className="p-8 rounded-[2.5rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-xl">
-              <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Configuração de Temas</label>
+              <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Fila de Geração</label>
               <textarea 
                 value={themes}
                 onChange={(e) => setThemes(e.target.value)}
                 className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm font-medium focus:border-brand-cyan outline-none transition-all placeholder:text-brand-muted/30"
-                placeholder="Um tema por linha..."
-                rows={4}
+                placeholder="Insira os temas estratégicos..."
+                rows={3}
               />
               <button 
                 onClick={generateDailyPosts} 
                 disabled={isGenerating} 
-                className={`w-full mt-8 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-[1.02] shadow-brand-cyan/20'}`}
+                className={`w-full mt-6 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-[1.01]'}`}
               >
-                {isGenerating ? 'Executando Protocolo...' : 'Gerar Novos Rascunhos'}
+                {isGenerating ? 'Processando Protocolo...' : 'Gerar Novos Rascunhos'}
               </button>
             </div>
           </div>
 
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 min-h-[250px] shadow-inner flex flex-col">
-            <span className="mb-4 pb-2 border-b border-brand-graphite/30 uppercase font-black opacity-50 tracking-widest">Logs Editoriais</span>
-            <div className="flex-grow overflow-y-auto max-h-[300px]">
-              {logs.length === 0 ? '> Pronto para curadoria...' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 shadow-inner flex flex-col">
+            <span className="mb-4 pb-2 border-b border-brand-graphite/30 uppercase font-black opacity-50 tracking-widest">Logs Operacionais</span>
+            <div className="flex-grow overflow-y-auto max-h-[220px]">
+              {logs.length === 0 ? '> Sistema pronto...' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
             </div>
           </div>
         </div>
 
         <div className="space-y-10">
-          <div className="flex items-center justify-between border-b border-brand-graphite pb-8">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-white">Fila de Revisão ({drafts.length})</h2>
-          </div>
+          <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6">Aguardando Validação Editorial ({drafts.length})</h2>
+          
           {drafts.length === 0 ? (
-            <div className="py-24 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted italic">Nenhum rascunho pendente de revisão.</div>
+            <div className="py-24 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted italic opacity-50">Nenhum rascunho pendente de revisão física.</div>
           ) : (
-            <div className="grid grid-cols-1 gap-10">
+            <div className="grid grid-cols-1 gap-8">
               {drafts.map(draft => (
                 <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-10 hover:border-brand-cyan/40 transition-all group">
-                  <div className="md:w-64 h-48 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 bg-brand-obsidian relative">
+                  <div className="md:w-64 h-44 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 bg-brand-obsidian relative">
                     <img src={draft.image} className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform" alt="Preview" />
                     {draft.image_source === 'upload' && (
-                      <div className="absolute top-4 right-4 bg-brand-amber text-brand-obsidian px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest shadow-lg">Upload</div>
+                      <div className="absolute bottom-4 right-4 bg-brand-cyan text-brand-obsidian px-2.5 py-1 rounded-full text-[7px] font-black uppercase tracking-widest shadow-xl">Storage</div>
                     )}
                   </div>
                   <div className="flex-grow">
@@ -375,8 +399,8 @@ const AdminDashboard: React.FC = () => {
                     <h3 className="text-2xl font-black mb-4 tracking-tighter text-white">{draft.title}</h3>
                     <p className="text-brand-muted text-sm line-clamp-2 mb-8">{draft.excerpt}</p>
                     <div className="flex flex-wrap gap-4">
-                      <button onClick={() => startEditing(draft)} className="px-8 py-3.5 rounded-2xl bg-white text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-cyan transition-all">✏️ Editar & Revisar</button>
-                      <button onClick={() => publishArticle(draft.id)} className="px-8 py-3.5 rounded-2xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all">🚀 Publicar</button>
+                      <button onClick={() => startEditing(draft)} className="px-8 py-3.5 rounded-2xl bg-white text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-cyan transition-all">✏️ Revisar & Salvar</button>
+                      <button onClick={() => publishArticle(draft.id)} className="px-8 py-3.5 rounded-2xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg shadow-brand-cyan/10">🚀 Publicar</button>
                       <button onClick={() => deleteDraft(draft.id)} className="px-8 py-3.5 rounded-2xl border border-brand-graphite text-brand-muted font-black text-[10px] uppercase tracking-widest hover:border-red-500 hover:text-red-500 transition-all">🗑️ Descartar</button>
                     </div>
                   </div>
