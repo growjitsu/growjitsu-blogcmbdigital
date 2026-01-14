@@ -8,15 +8,21 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Método não permitido' });
   }
 
+  const { themes } = req.body;
+
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-    // PASSO 1: Gerar o conteúdo textual e os prompts de imagem
+    // PASSO 1: Gerar o conteúdo textual baseado nos temas fornecidos
+    const promptTemas = themes && themes.length > 0 
+      ? `Gere 1 artigo épico para cada um destes temas específicos: ${themes.join(", ")}.`
+      : "Gere 3 artigos épicos sobre as maiores tendências de IA e Tecnologia no Brasil.";
+
     const curatorResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Gere 3 artigos épicos sobre tendências de IA, Marketing Digital e Tecnologia no Brasil para 2025.",
+      contents: promptTemas,
       config: {
-        systemInstruction: "Você é o Editor-Chefe Sênior da CMBDIGITAL. Gere conteúdos profundos e prompts de imagem detalhados em inglês para uma estética tecnológica e premium.",
+        systemInstruction: "Você é o Editor-Chefe Sênior da CMBDIGITAL. OBRIGATÓRIO: Conteúdo 100% em Português (pt-BR). Linguagem natural, profissional e otimizada para SEO. Gere prompts de imagem em inglês para o modelo visual. Estética: Premium, Editorial, Tech.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -32,7 +38,7 @@ export default async function handler(req: any, res: any) {
                   content: { type: Type.STRING },
                   category: { type: Type.STRING },
                   tags: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  promptImagem: { type: Type.STRING, description: "Detailed English prompt for high-end tech imagery" }
+                  promptImagem: { type: Type.STRING, description: "Detailed English prompt for high-end cinematic tech imagery, no text" }
                 },
                 required: ["slug", "title", "excerpt", "content", "category", "tags", "promptImagem"]
               }
@@ -44,18 +50,18 @@ export default async function handler(req: any, res: any) {
     });
 
     const curatorText = curatorResponse.text;
-    if (!curatorText) throw new Error("Falha ao gerar rascunhos iniciais.");
+    if (!curatorText) throw new Error("Falha ao gerar rascunhos.");
     
     const data = JSON.parse(curatorText);
     const rawArticles = data.articles || [];
 
-    // PASSO 2: Gerar as imagens reais para cada artigo
+    // PASSO 2: Gerar as imagens reais para cada artigo (Geração em Paralelo)
     const articlesWithImages = await Promise.all(rawArticles.map(async (art: any) => {
       try {
         const imageResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: {
-            parts: [{ text: `High-quality, professional editorial photography, cinematic lighting, 8k resolution, premium tech style: ${art.promptImagem}` }]
+            parts: [{ text: `High-quality professional editorial photography, cinematic lighting, 8k, premium tech style, clean composition, NO TEXT: ${art.promptImagem}` }]
           },
           config: {
             imageConfig: {
@@ -64,9 +70,8 @@ export default async function handler(req: any, res: any) {
           }
         });
 
-        let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",tech")}`; // Fallback
+        let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",technology")}`;
 
-        // Procurar a parte da imagem na resposta
         if (imageResponse.candidates?.[0]?.content?.parts) {
           for (const part of imageResponse.candidates[0].content.parts) {
             if (part.inlineData) {
@@ -85,8 +90,7 @@ export default async function handler(req: any, res: any) {
           image: imageUrl
         };
       } catch (imgError) {
-        console.error("Erro ao gerar imagem para artigo:", art.title, imgError);
-        // Em caso de erro na imagem, retornamos com o fallback do Unsplash para não perder o texto
+        console.error("Erro na imagem:", art.title, imgError);
         return {
           ...art,
           id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
@@ -104,10 +108,10 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("ERRO NO MOTOR DE CURADORIA:", error);
+    console.error("ERRO EDITORIAL:", error);
     return res.status(500).json({ 
       success: false,
-      error: 'Erro na geração de conteúdo e imagens',
+      error: 'Falha na curadoria inteligente',
       details: error.message
     });
   }
