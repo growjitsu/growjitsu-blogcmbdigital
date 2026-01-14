@@ -64,40 +64,34 @@ const AdminDashboard: React.FC = () => {
   const generateDailyPosts = async () => {
     setIsGenerating(true);
     setLogs([]);
-    addLog("Iniciando Protocolo de Varredura (Engine: OpenAI)...");
+    addLog("Iniciando Varredura Editorial Direta...");
 
     try {
-      addLog("Solicitando curadoria ao motor serverless...");
+      addLog("Conectando ao motor serverless (Auth: API_KEY)...");
       
       const response = await fetch('/api/curadoria', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
 
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("O servidor retornou uma resposta inválida (não-JSON). Verifique os logs da Vercel.");
-      }
-
       const data = await response.json();
 
       if (!response.ok || data.success === false) {
-        throw new Error(data.details || data.error || "Falha na resposta do motor editorial.");
+        throw new Error(data.details || data.error || "Falha na resposta do servidor.");
       }
 
       const newArticles = data.articles || [];
-
       addLog(`Sucesso: ${newArticles.length} rascunhos inéditos gerados.`);
       
       const updatedDrafts = [...newArticles, ...drafts];
       setDrafts(updatedDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
       
-      addLog("CONCLUÍDO: Conteúdo pronto para revisão.");
+      addLog("CONCLUÍDO: Conteúdo pronto para revisão manual.");
 
     } catch (error: any) {
       console.error(error);
-      addLog(`ERRO CRÍTICO: ${error.message}`);
+      addLog(`ERRO: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -164,7 +158,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs">OPENAI GPT-4o | STATUS: {isGenerating ? 'EXECUTANDO...' : 'OPERACIONAL'}</p>
+            <p className="text-brand-muted font-mono text-xs">SISTEMA ATIVO: GPT-4o | KEY: PROTEGIDO</p>
           </div>
           <div className="flex gap-4">
              <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>

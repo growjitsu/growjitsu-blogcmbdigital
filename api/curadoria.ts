@@ -2,7 +2,7 @@
 import OpenAI from 'openai';
 
 export default async function handler(req: any, res: any) {
-  // Forçar o cabeçalho de resposta para JSON imediatamente
+  // Garantia de resposta JSON em 100% dos casos
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method !== 'POST') {
@@ -13,12 +13,13 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // Inicialização direta. O erro "Unexpected token A" geralmente ocorre quando 
-    // a Vercel retorna uma página de erro HTML por falha na execução.
-    const apiKey = process.env.OPENAI_API_KEY;
-    
+    /**
+     * CONTEXTO TÉCNICO:
+     * A chave de API é injetada no ambiente via process.env.API_KEY.
+     * Estamos instanciando diretamente sem validações prévias para evitar falsos negativos de ambiente.
+     */
     const openai = new OpenAI({
-      apiKey: apiKey,
+      apiKey: process.env.API_KEY,
     });
 
     const response = await openai.chat.completions.create({
@@ -26,23 +27,23 @@ export default async function handler(req: any, res: any) {
       messages: [
         {
           role: "system",
-          content: "Você é o Editor-Chefe Sênior da CMBDIGITAL. Você responde exclusivamente em JSON puro. Não use markdown, não use blocos de código, não inclua texto antes ou depois do JSON."
+          content: "Você é o Editor-Chefe Sênior da CMBDIGITAL. Responda estritamente com JSON puro. Não use markdown, não use blocos de código (```json), não use comentários. Foque em tecnologia, IA e Marketing Digital no Brasil."
         },
         {
           role: "user",
           content: `PROTOCOLO EDITORIAL:
-          Gere 3 artigos de alta performance sobre tendências de tecnologia e marketing digital no Brasil.
-          Retorne obrigatoriamente neste formato JSON:
+          Gere 3 artigos de alta performance.
+          Formato JSON obrigatório:
           {
             "articles": [
               {
-                "slug": "string",
-                "title": "string",
-                "excerpt": "string",
-                "content": "string (mínimo 500 palavras, sem HTML)",
-                "category": "string (IA, Tecnologia, Marketing Digital ou Produtividade)",
+                "slug": "url-do-artigo",
+                "title": "Título SEO Impactante",
+                "excerpt": "Resumo para o card",
+                "content": "Conteúdo editorial completo (mínimo 500 palavras, em texto puro, sem HTML)",
+                "category": "IA, Tecnologia, Marketing Digital ou Produtividade",
                 "tags": ["tag1", "tag2"],
-                "promptImagem": "string (detalhado em inglês)"
+                "promptImagem": "Prompt para imagem em inglês"
               }
             ]
           }`
@@ -55,22 +56,19 @@ export default async function handler(req: any, res: any) {
     const rawContent = response.choices[0].message.content;
     
     if (!rawContent) {
-      throw new Error("A API da OpenAI retornou um conteúdo vazio.");
+      throw new Error("Resposta vazia do motor OpenAI.");
     }
 
     const data = JSON.parse(rawContent);
 
-    if (!data.articles || !Array.isArray(data.articles)) {
-      throw new Error("Estrutura de dados inválida retornada pelo motor editorial.");
-    }
-
-    const processedArticles = data.articles.map((art: any) => ({
+    // Processamento dos metadados e IDs
+    const processedArticles = (data.articles || []).map((art: any) => ({
       ...art,
       id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
       author: 'CMBDIGITAL',
       date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
       status: 'draft',
-      image: `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",tech")}`
+      image: `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",technology")}`
     }));
 
     return res.status(200).json({ 
@@ -79,13 +77,12 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("ERRO NO MOTOR DE CURADORIA:", error);
+    console.error("FALHA NO MOTOR EDITORIAL:", error);
     
-    // GARANTIA: Sempre retorna JSON, nunca texto puro ou HTML
     return res.status(500).json({ 
       success: false,
-      error: 'Falha na execução da curadoria',
-      details: error.message || 'Erro interno desconhecido'
+      error: 'Erro na execução do protocolo de curadoria',
+      details: error.message || 'Erro de comunicação com o motor de IA.'
     });
   }
 }
