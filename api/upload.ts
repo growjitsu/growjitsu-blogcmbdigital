@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const config = {
   api: {
-    bodyParser: false, // Desativa o parser para lidar com stream binário
+    bodyParser: false,
   },
 };
 
@@ -13,25 +13,11 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Método não permitido' });
   }
 
-  // 1. Extração de Variáveis de Ambiente (Prioridade Total para Env Vars)
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  // Diagnóstico Crítico
-  if (!supabaseUrl || !supabaseServiceKey) {
-    console.error("ERRO DE CONFIGURAÇÃO BACKEND:");
-    console.error("- SUPABASE_URL:", supabaseUrl ? "OK" : "AUSENTE");
-    console.error("- SUPABASE_SERVICE_ROLE_KEY:", supabaseServiceKey ? "OK" : "AUSENTE");
-    
-    return res.status(500).json({ 
-      success: false, 
-      error: "Ambiente não configurado", 
-      reason: "As variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY devem ser configuradas na Vercel e o projeto deve ser REDEPLOYED." 
-    });
-  }
+  // URLs e Chaves atualizadas com os valores fornecidos pelo usuário
+  const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
 
   try {
-    // 2. Cliente com Service Role (Privilégios Administrativos - Ignora RLS)
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
         autoRefreshToken: false,
@@ -39,7 +25,6 @@ export default async function handler(req: any, res: any) {
       }
     });
 
-    // 3. Coleta do Stream Binário
     const chunks: any[] = [];
     req.on('data', (chunk: any) => chunks.push(chunk));
     
@@ -50,11 +35,9 @@ export default async function handler(req: any, res: any) {
     
     const buffer = Buffer.concat(chunks);
     
-    // Metadados passados via Headers para simplicidade
     const fileName = req.headers['x-file-name'] || `upload-${Date.now()}.webp`;
     const contentType = req.headers['content-type'] || 'image/webp';
 
-    // 4. Upload para o Bucket 'blog-images'
     const { data, error: uploadError } = await supabaseAdmin.storage
       .from('blog-images')
       .upload(`posts/${fileName}`, buffer, {
@@ -63,7 +46,7 @@ export default async function handler(req: any, res: any) {
       });
 
     if (uploadError) {
-      console.error('SUPABASE STORAGE ERROR (Service Role Attempt):', uploadError.message);
+      console.error('SUPABASE STORAGE ERROR:', uploadError.message);
       return res.status(500).json({ 
         success: false, 
         error: "Erro no Storage do Supabase", 
@@ -71,12 +54,9 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 5. URL Pública
     const { data: { publicUrl } } = supabaseAdmin.storage
       .from('blog-images')
       .getPublicUrl(`posts/${fileName}`);
-
-    console.log(`Upload concluído via Service Role: ${fileName}`);
 
     return res.status(200).json({ 
       success: true, 

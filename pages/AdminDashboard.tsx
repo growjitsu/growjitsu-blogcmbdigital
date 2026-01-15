@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Article } from '../types';
 
 const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
-const supabaseAnonKey = 'sb_publishable_36McnPdKx5T7gEKzeMQYDQ_o44rEiYJ';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgxNzc1ODYsImV4cCI6MjA4Mzc1MzU4Nn0.jJQpw4suKZof8caOsQ41PBOegESYqi-iLatK1qk4GzQ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const AdminDashboard: React.FC = () => {
@@ -148,7 +148,7 @@ const AdminDashboard: React.FC = () => {
     } catch (error: any) {
       console.error("ERRO DE UPLOAD:", error);
       addLog(`FALHA: ${error.message}`);
-      alert(`Erro de Configuração Supabase:\n\n${error.message}\n\nIMPORTANTE: Se você já adicionou a chave na Vercel, você PRECISA fazer um REDEPLOY manual para que as mudanças entrem em vigor.`);
+      alert(`Erro no Storage:\n\n${error.message}\n\nVerifique as variáveis de ambiente no servidor.`);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -317,7 +317,7 @@ const AdminDashboard: React.FC = () => {
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL Pública Persistente</label>
                     <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-xs font-mono truncate cursor-not-allowed" />
-                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Protegido via SUPABASE_SERVICE_ROLE_KEY (Server-side)</p>
+                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Protegido via Backend (Service Role)</p>
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags</label>
