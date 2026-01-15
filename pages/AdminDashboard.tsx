@@ -27,6 +27,9 @@ const AdminDashboard: React.FC = () => {
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
+  // MODOS: 'generate' (Curadoria IA) ou 'manage' (Edição/Gestão)
+  const [activeMode, setActiveMode] = useState<'generate' | 'manage'>('generate');
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [themes, setThemes] = useState('');
   const [drafts, setDrafts] = useState<Article[]>([]);
@@ -45,20 +48,23 @@ const AdminDashboard: React.FC = () => {
     };
     checkSession();
 
-    // Carregamento Unificado
-    const savedDrafts = JSON.parse(localStorage.getItem('cmb_drafts') || '[]');
-    const savedPublished = JSON.parse(localStorage.getItem('cmb_published') || '[]');
-    
-    // Mesclar estáticos com publicados do storage para edição universal
-    const storageSlugs = new Set(savedPublished.map((a: Article) => a.slug));
-    const staticPosts = STATIC_ARTICLES.filter(a => !storageSlugs.has(a.slug)).map(a => ({...a, status: 'published' as const}));
-    
-    const combinedPublished = [...savedPublished, ...staticPosts].sort((a, b) => 
-      parseDate(b.date).getTime() - parseDate(a.date).getTime()
-    );
+    // Carregamento Inicial
+    const loadContent = () => {
+      const savedDrafts = JSON.parse(localStorage.getItem('cmb_drafts') || '[]');
+      const savedPublished = JSON.parse(localStorage.getItem('cmb_published') || '[]');
+      
+      const storageSlugs = new Set(savedPublished.map((a: Article) => a.slug));
+      const staticPosts = STATIC_ARTICLES.filter(a => !storageSlugs.has(a.slug)).map(a => ({...a, status: 'published' as const}));
+      
+      const combinedPublished = [...savedPublished, ...staticPosts].sort((a, b) => 
+        parseDate(b.date).getTime() - parseDate(a.date).getTime()
+      );
 
-    setDrafts(savedDrafts);
-    setPublishedArticles(combinedPublished);
+      setDrafts(savedDrafts);
+      setPublishedArticles(combinedPublished);
+    };
+
+    loadContent();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
@@ -77,20 +83,53 @@ const AdminDashboard: React.FC = () => {
 
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-8));
 
-  // FIX: Added missing startEditing function to handle UI callbacks
+  // CURADORIA AUTOMÁTICA
+  const generateDailyPosts = async () => {
+    if (!themes.trim()) return alert("Digite ao menos um tema.");
+    
+    setIsGenerating(true);
+    setLogs([]);
+    addLog("Iniciando Protocolo de Varredura IA...");
+    
+    const themesList = themes.split('\n').filter(t => t.trim() !== '');
+
+    try {
+      const response = await fetch('/api/curadoria', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themes: themesList })
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || "Erro no servidor de curadoria.");
+
+      const newArticles = data.articles || [];
+      const updatedDrafts = [...newArticles, ...drafts];
+      
+      setDrafts(updatedDrafts);
+      localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
+      setThemes('');
+      addLog(`Sucesso: ${newArticles.length} rascunhos prontos para revisão.`);
+    } catch (error: any) {
+      addLog(`FALHA: ${error.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const startEditing = (article: Article) => {
-    setEditingArticle(article);
-    addLog(`Iniciando edição de: ${article.title}`);
+    setEditingArticle({ ...article });
+    addLog(`Abrindo editor: ${article.title}`);
   };
 
   const saveEdit = () => {
     if (!editingArticle) return;
+    
     if (editingArticle.status === 'published') {
       const updated = publishedArticles.map(a => a.id === editingArticle.id ? editingArticle : a);
       setPublishedArticles(updated);
-      // Salvar apenas os que não são idênticos aos estáticos ou salvar todos para garantir edição
       localStorage.setItem('cmb_published', JSON.stringify(updated));
-      addLog(`Asset "${editingArticle.title}" sincronizado.`);
+      addLog(`Asset publicado "${editingArticle.title}" atualizado.`);
     } else {
       const updated = drafts.map(d => d.id === editingArticle.id ? editingArticle : d);
       setDrafts(updated);
@@ -116,25 +155,46 @@ const AdminDashboard: React.FC = () => {
     setDrafts(drafts.filter(d => d.id !== id));
     localStorage.setItem('cmb_drafts', JSON.stringify(drafts.filter(d => d.id !== id)));
     
-    addLog(`Post Live: ${publishedPost.title}`);
+    addLog(`Post em PRODUÇÃO: ${publishedPost.title}`);
     setEditingArticle(null);
   };
 
   const unpublishArticle = (id: string) => {
+    if (!confirm("Despublicar este post?")) return;
     const post = publishedArticles.find(a => a.id === id);
     if (!post) return;
+    
     const draftPost = { ...post, status: 'draft' as const };
-    setPublishedArticles(publishedArticles.filter(a => a.id !== id));
-    localStorage.setItem('cmb_published', JSON.stringify(publishedArticles.filter(a => a.id !== id)));
+    const newPublished = publishedArticles.filter(a => a.id !== id);
+    
+    setPublishedArticles(newPublished);
+    localStorage.setItem('cmb_published', JSON.stringify(newPublished));
+    
     setDrafts([draftPost, ...drafts]);
     localStorage.setItem('cmb_drafts', JSON.stringify([draftPost, ...drafts]));
-    addLog("Post movido para rascunhos.");
+    
+    addLog("Ativo movido para rascunhos.");
+  };
+
+  const deleteArticle = (id: string, from: 'draft' | 'published') => {
+    if (!confirm("Excluir permanentemente?")) return;
+    if (from === 'draft') {
+      const remaining = drafts.filter(d => d.id !== id);
+      setDrafts(remaining);
+      localStorage.setItem('cmb_drafts', JSON.stringify(remaining));
+    } else {
+      const remaining = publishedArticles.filter(a => a.id !== id);
+      setPublishedArticles(remaining);
+      localStorage.setItem('cmb_published', JSON.stringify(remaining));
+    }
+    addLog("Item removido do sistema.");
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editingArticle) return;
     setIsUploading(true);
+    addLog("Enviando asset para o storage...");
     try {
       const fileName = `${editingArticle.slug}-${Date.now()}.${file.name.split('.').pop()}`;
       const response = await fetch('/api/upload', {
@@ -145,8 +205,14 @@ const AdminDashboard: React.FC = () => {
       const data = await response.json();
       if (!data.success) throw new Error(data.reason);
       setEditingArticle({ ...editingArticle, image: data.image_url });
-      addLog("Imagem atualizada no storage.");
-    } catch (e: any) { alert(e.message); } finally { setIsUploading(false); }
+      addLog("Imagem persistida com sucesso.");
+    } catch (e: any) { 
+      alert(e.message); 
+      addLog(`Erro Upload: ${e.message}`);
+    } finally { 
+      setIsUploading(false); 
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   if (isAuthenticated === null) return <div className="min-h-screen bg-brand-obsidian flex items-center justify-center"><div className="w-10 h-10 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>;
@@ -154,11 +220,18 @@ const AdminDashboard: React.FC = () => {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-obsidian px-4">
-        <form onSubmit={handleLogin} className="p-8 rounded-[2.5rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-6 w-full max-w-md">
-          <h1 className="text-2xl font-black text-white text-center uppercase">Motor Editorial</h1>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-white outline-none" placeholder="Admin E-mail" />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-white outline-none" placeholder="Senha" />
-          <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-4 rounded-xl font-black uppercase">{isLoggingIn ? 'Acessando...' : 'Entrar'}</button>
+        <form onSubmit={handleLogin} className="p-10 rounded-[3rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-8 w-full max-w-md">
+          <div className="text-center">
+            <h1 className="text-3xl font-black text-white uppercase tracking-tighter">Terminal Editorial</h1>
+            <p className="text-brand-muted text-xs font-bold uppercase tracking-widest mt-2">CMBDIGITAL Access Only</p>
+          </div>
+          <div className="space-y-4">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 text-white outline-none focus:border-brand-cyan" placeholder="Admin E-mail" required />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 text-white outline-none focus:border-brand-cyan" placeholder="Senha" required />
+          </div>
+          <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/20">
+            {isLoggingIn ? 'Autenticando...' : 'Iniciar Protocolo'}
+          </button>
         </form>
       </div>
     );
@@ -167,80 +240,185 @@ const AdminDashboard: React.FC = () => {
   return (
     <div className="min-h-screen pt-32 pb-20 bg-brand-obsidian text-brand-soft">
       <div className="container mx-auto px-4 max-w-6xl">
-        <div className="flex justify-between items-end mb-16">
+        
+        {/* HEADER DO PAINEL */}
+        <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase text-white">Gestão <span className="text-brand-cyan">Unificada</span></h1>
-            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Todos os posts (Legados + Novos) são editáveis</p>
+            <h1 className="text-5xl font-black tracking-tighter uppercase text-white">Motor <span className="text-brand-cyan">Editorial</span></h1>
+            <div className="flex gap-4 mt-6">
+              <button 
+                onClick={() => setActiveMode('generate')}
+                className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'generate' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted border border-brand-graphite'}`}
+              >
+                Gerar Conteúdo (IA)
+              </button>
+              <button 
+                onClick={() => setActiveMode('manage')}
+                className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'manage' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted border border-brand-graphite'}`}
+              >
+                Gerenciar Ativos ({publishedArticles.length})
+              </button>
+            </div>
           </div>
-          <button onClick={() => supabase.auth.signOut()} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500">Sair</button>
+          <button onClick={() => supabase.auth.signOut()} className="px-8 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 hover:text-red-500 transition-all">Encerrar Sessão</button>
         </div>
 
-        {editingArticle && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 overflow-y-auto">
-            <div className="bg-brand-graphite w-full max-w-5xl p-8 md:p-12 rounded-[3.5rem] border border-brand-graphite shadow-2xl space-y-8 my-8 relative">
-              <div className="flex justify-between items-center">
-                <h2 className="text-3xl font-black uppercase text-brand-cyan">Editor Global</h2>
-                <button onClick={() => setEditingArticle(null)} className="text-brand-muted text-3xl">×</button>
+        {/* MODO: GERAR CONTEÚDO (CURADORIA IA) */}
+        {activeMode === 'generate' && (
+          <div className="space-y-12">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+              <div className="lg:col-span-2 p-10 rounded-[3rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-2xl">
+                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Brainstorming de Tópicos</label>
+                <textarea 
+                  value={themes} 
+                  onChange={(e) => setThemes(e.target.value)} 
+                  className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px]" 
+                  placeholder="Ex: Inteligência Artificial no Marketing, Futuro das Startups 2025, Automação Digital..." 
+                />
+                <button 
+                  onClick={generateDailyPosts} 
+                  disabled={isGenerating} 
+                  className="w-full mt-6 py-6 rounded-2xl font-black text-xs uppercase tracking-widest bg-brand-cyan text-brand-obsidian hover:bg-brand-purple hover:text-white transition-all shadow-xl shadow-brand-cyan/20"
+                >
+                  {isGenerating ? 'Curadoria em Progresso...' : 'Gerar Posts Automaticamente'}
+                </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                <div className="space-y-6">
-                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none" placeholder="Título" />
-                  <input type="text" value={editingArticle.slug} readOnly className="w-full bg-brand-obsidian/50 border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted cursor-not-allowed font-mono text-xs" />
-                  <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none h-24 text-sm" placeholder="Resumo" />
+              <div className="p-8 rounded-[3rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 overflow-y-auto h-full max-h-[300px]">
+                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 text-[9px] uppercase tracking-widest">Logs do Terminal</div>
+                {logs.length === 0 ? <p className="opacity-30 italic">Aguardando comando...</p> : logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
+              </div>
+            </div>
+
+            {/* FILA DE RASCUNHOS (VALIDAÇÃO) */}
+            <div className="space-y-8">
+              <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6 flex justify-between items-center">
+                Aguardando Validação 
+                <span className="bg-brand-graphite text-brand-muted text-[10px] px-4 py-1 rounded-full">{drafts.length} itens</span>
+              </h2>
+              {drafts.length === 0 ? (
+                <div className="py-20 text-center bg-brand-graphite/10 rounded-[3rem] border border-dashed border-brand-graphite">
+                  <p className="text-brand-muted font-bold italic">Nenhum rascunho na fila. Use a IA para gerar conteúdo.</p>
                 </div>
-                <div className="space-y-6">
-                  <div className="rounded-[2rem] overflow-hidden border border-brand-graphite h-48 bg-brand-obsidian relative group">
-                    <img src={editingArticle.image} className="w-full h-full object-cover" alt="Editor" />
-                    <div className="absolute inset-0 bg-brand-obsidian/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-xs uppercase">Trocar Imagem</button>
+              ) : (
+                <div className="grid grid-cols-1 gap-6">
+                  {drafts.map(draft => (
+                    <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 items-center group hover:border-brand-cyan transition-all">
+                      <img src={draft.image} className="w-40 h-28 rounded-2xl object-cover bg-brand-obsidian" />
+                      <div className="flex-grow">
+                        <h3 className="text-xl font-black text-white mb-2">{draft.title}</h3>
+                        <p className="text-[10px] text-brand-muted uppercase font-bold tracking-widest">{draft.category} • {draft.date}</p>
+                      </div>
+                      <div className="flex gap-4">
+                        <button onClick={() => startEditing(draft)} className="text-[9px] font-black uppercase bg-white text-brand-obsidian px-6 py-3 rounded-xl hover:bg-brand-cyan transition-all">Revisar</button>
+                        <button onClick={() => publishArticle(draft.id)} className="text-[9px] font-black uppercase bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl hover:bg-brand-purple hover:text-white transition-all shadow-lg">Publicar</button>
+                        <button onClick={() => deleteArticle(draft.id, 'draft')} className="text-brand-muted hover:text-red-500 transition-colors text-xl">×</button>
+                      </div>
                     </div>
-                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
-                  </div>
-                  <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none" placeholder="Categoria" />
+                  ))}
                 </div>
-              </div>
-              <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed" placeholder="Conteúdo HTML" />
-              <div className="flex gap-4 pt-8 border-t border-brand-graphite">
-                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase">Salvar Alterações</button>
-                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase shadow-2xl">Lançar Atualização</button>
-              </div>
+              )}
             </div>
           </div>
         )}
 
-        <div className="space-y-12">
-          {/* Seção de Publicados - Agora inclui os posts estáticos */}
-          <div className="space-y-8">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Ativos Publicados ({publishedArticles.length})</h2>
-            <div className="grid grid-cols-1 gap-4">
-              {publishedArticles.map(article => (
-                <div key={article.id} className="p-6 rounded-3xl bg-brand-cyan/5 border border-brand-cyan/10 flex flex-col md:flex-row gap-8 items-center group">
-                  <img src={article.image} className="w-32 h-20 rounded-2xl object-cover bg-brand-obsidian" />
-                  <div className="flex-grow">
-                    <h3 className="text-lg font-black text-white">{article.title}</h3>
-                    <p className="text-[10px] text-brand-muted font-mono">{article.date} • {article.slug}</p>
+        {/* MODO: GERENCIAR ATIVOS (POSTS PUBLICADOS) */}
+        {activeMode === 'manage' && (
+          <div className="space-y-12">
+            <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Biblioteca de Ativos Ativos ({publishedArticles.length})</h2>
+            {publishedArticles.length === 0 ? (
+              <p className="text-brand-muted italic py-10">Nenhum post publicado no sistema.</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-6">
+                {publishedArticles.map(article => (
+                  <div key={article.id} className="p-8 rounded-[3rem] bg-brand-cyan/5 border border-brand-cyan/10 flex flex-col md:flex-row gap-8 items-center group hover:bg-brand-cyan/10 transition-all">
+                    <div className="relative">
+                      <img src={article.image} className="w-32 h-24 rounded-2xl object-cover bg-brand-obsidian" />
+                      <span className="absolute -top-2 -right-2 bg-green-500 w-4 h-4 rounded-full border-4 border-brand-obsidian"></span>
+                    </div>
+                    <div className="flex-grow">
+                      <h3 className="text-lg font-black text-white mb-1">{article.title}</h3>
+                      <div className="flex gap-6 text-[9px] font-bold text-brand-muted uppercase tracking-widest">
+                        <span>{article.category}</span>
+                        <span>Slug: {article.slug}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-4">
+                      <button onClick={() => startEditing(article)} className="text-[9px] font-black uppercase bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl hover:scale-105 transition-all">✏️ Editar</button>
+                      <button onClick={() => unpublishArticle(article.id)} className="text-[9px] font-black uppercase border border-brand-cyan/30 text-brand-cyan px-6 py-3 rounded-xl hover:bg-brand-cyan/10 transition-all">Despublicar</button>
+                      <button onClick={() => deleteArticle(article.id, 'published')} className="text-brand-muted hover:text-red-500 transition-colors text-xl">×</button>
+                    </div>
                   </div>
-                  <div className="flex gap-3">
-                    <button onClick={() => startEditing(article)} className="text-[9px] font-black uppercase bg-brand-cyan text-brand-obsidian px-5 py-3 rounded-xl">✏️ Editar</button>
-                    <button onClick={() => unpublishArticle(article.id)} className="text-[9px] font-black uppercase border border-brand-cyan/30 text-brand-cyan px-5 py-3 rounded-xl">Despublicar</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MODAL GLOBAL DE EDIÇÃO */}
+        {editingArticle && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 overflow-y-auto">
+            <div className="bg-brand-graphite w-full max-w-5xl p-10 md:p-14 rounded-[3.5rem] border border-brand-graphite shadow-2xl space-y-8 my-8 relative">
+              
+              {isUploading && (
+                <div className="absolute inset-0 bg-brand-obsidian/80 z-[110] flex flex-col items-center justify-center rounded-[3.5rem] backdrop-blur-sm">
+                  <div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
+                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan">Sincronizando Asset no Storage...</p>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <h2 className="text-3xl font-black uppercase text-brand-cyan tracking-tighter">Editor Editorial</h2>
+                  <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase border ${editingArticle.status === 'published' ? 'bg-green-500/10 border-green-500/20 text-green-500' : 'bg-brand-amber/10 border-brand-amber/20 text-brand-amber'}`}>
+                    {editingArticle.status === 'published' ? 'LIVE' : 'RASCUNHO'}
+                  </span>
+                </div>
+                <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors text-3xl">×</button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div className="space-y-6">
+                  <div>
+                    <label className="text-[9px] font-black uppercase tracking-widest opacity-50 mb-2 block">Título</label>
+                    <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black uppercase tracking-widest opacity-50 mb-2 block">Slug (SEO Fixo)</label>
+                    <input type="text" value={editingArticle.slug} readOnly className="w-full bg-brand-obsidian/50 border border-brand-graphite rounded-2xl px-6 py-5 text-brand-muted cursor-not-allowed font-mono text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black uppercase tracking-widest opacity-50 mb-2 block">Resumo</label>
+                    <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm" />
                   </div>
                 </div>
-              ))}
+
+                <div className="space-y-6">
+                  <div className="rounded-[2.5rem] overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-xl">
+                    <img src={editingArticle.image} className="w-full h-full object-cover" alt="Editor" />
+                    <div className="absolute inset-0 bg-brand-obsidian/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-4">
+                      <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase shadow-xl">Upload Manual</button>
+                    </div>
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black uppercase tracking-widest opacity-50 mb-2 block">Categoria</label>
+                    <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan" />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[9px] font-black uppercase tracking-widest opacity-50 mb-2 block">Conteúdo Estruturado (HTML)</label>
+                <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed" />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-brand-graphite">
+                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest hover:border-white transition-all">Sincronizar Rascunho</button>
+                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-2xl shadow-brand-cyan/20">🚀 Publicar Imediatamente</button>
+              </div>
             </div>
           </div>
-
-          {/* Seção de Rascunhos */}
-          <div className="space-y-8">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6">Fila de Rascunhos ({drafts.length})</h2>
-            {drafts.map(draft => (
-              <div key={draft.id} className="p-6 rounded-3xl bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 items-center">
-                <img src={draft.image} className="w-32 h-20 rounded-2xl object-cover" />
-                <div className="flex-grow"><h3 className="text-lg font-black text-white">{draft.title}</h3></div>
-                <button onClick={() => startEditing(draft)} className="text-[9px] font-black uppercase bg-white text-brand-obsidian px-5 py-3 rounded-xl">Revisar</button>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
