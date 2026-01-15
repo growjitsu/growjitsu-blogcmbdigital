@@ -111,50 +111,50 @@ const AdminDashboard: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file || !editingArticle) return;
 
-    // Validações de Cliente
     if (file.size > 2 * 1024 * 1024) {
-      alert("Erro: O arquivo excede 2MB.");
+      alert("Erro: O arquivo excede o limite de 2MB.");
       return;
     }
 
     setIsUploading(true);
-    addLog(`Iniciando upload físico: ${file.name}...`);
+    addLog(`Enviando para API de Persistência: ${file.name}...`);
 
     try {
-      // Gerar nome único profissional
       const fileExt = file.name.split('.').pop();
       const fileName = `${editingArticle.slug || 'post'}-${Date.now()}.${fileExt}`;
-      const filePath = `posts/${fileName}`;
 
-      // Upload para Supabase Storage
-      const { data, error: uploadError } = await supabase.storage
-        .from('blog-images') // Certifique-se que o bucket 'blog-images' existe e é público
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
+      // Chamada para a nova API de Upload (Backend)
+      // Passamos o arquivo diretamente no body e metadados nos headers
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          'x-file-name': fileName,
+          'content-type': file.type,
+        },
+        body: file // Envia o binário
+      });
 
-      if (uploadError) throw uploadError;
+      const data = await response.json();
 
-      // Obter URL Pública
-      const { data: { publicUrl } } = supabase.storage
-        .from('blog-images')
-        .getPublicUrl(filePath);
+      if (!response.ok || !data.success) {
+        throw new Error(data.reason || data.error || "Erro desconhecido no upload.");
+      }
 
       setEditingArticle({ 
         ...editingArticle, 
-        image: publicUrl, 
+        image: data.image_url, 
         image_source: 'upload' 
       });
       
-      addLog("Upload concluído. URL persistente gerada.");
+      addLog("SUCESSO: Imagem salva fisicamente no Storage.");
       
     } catch (error: any) {
-      console.error("Erro no Storage:", error);
-      addLog(`Erro no upload: ${error.message}`);
-      alert("Falha ao salvar imagem no servidor. Verifique as permissões do Bucket.");
+      console.error("ERRO DE UPLOAD:", error);
+      addLog(`FALHA NO STORAGE: ${error.message}`);
+      alert(`Erro de Permissão ou Configuração:\n${error.message}\n\nCertifique-se de que a variável SUPABASE_SERVICE_ROLE_KEY está configurada no seu ambiente.`);
     } finally {
       setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -191,7 +191,6 @@ const AdminDashboard: React.FC = () => {
   };
 
   const publishArticle = (id: string) => {
-    // Se estiver editando, salvar antes de publicar
     if (editingArticle && editingArticle.id === id) {
       saveEdit();
     }
@@ -243,7 +242,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2 text-white">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Sincronização com Storage Ativa</p>
+            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Server-Side Ativa</p>
           </div>
           <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
         </div>
@@ -254,9 +253,9 @@ const AdminDashboard: React.FC = () => {
             <div className="bg-brand-graphite w-full max-w-4xl p-8 md:p-12 rounded-[3rem] border border-brand-graphite shadow-2xl space-y-8 my-8 relative">
               
               {isUploading && (
-                <div className="absolute inset-0 bg-brand-obsidian/80 z-[110] flex flex-col items-center justify-center rounded-[3rem]">
+                <div className="absolute inset-0 bg-brand-obsidian/80 z-[110] flex flex-col items-center justify-center rounded-[3rem] backdrop-blur-sm">
                   <div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
-                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan">Persistindo Imagem no Storage...</p>
+                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan animate-pulse">Ignorando RLS & Salvando no Storage...</p>
                 </div>
               )}
 
@@ -264,7 +263,7 @@ const AdminDashboard: React.FC = () => {
                 <div className="flex items-center gap-4">
                   <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Revisão Editorial</h2>
                   {editingArticle.image_source === 'upload' && (
-                    <span className="text-[8px] bg-brand-cyan/20 text-brand-cyan px-2 py-0.5 rounded-full border border-brand-cyan/30 uppercase font-black tracking-widest">Imagem Persistida</span>
+                    <span className="text-[8px] bg-brand-cyan/20 text-brand-cyan px-2 py-0.5 rounded-full border border-brand-cyan/30 uppercase font-black tracking-widest">Persistência Garantida</span>
                   )}
                 </div>
                 <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors text-3xl">×</button>
@@ -300,7 +299,7 @@ const AdminDashboard: React.FC = () => {
                         onClick={() => fileInputRef.current?.click()}
                         className="w-full max-w-[220px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
                       >
-                        📤 Upload Manual (Storage)
+                        📤 Upload (Bypass RLS)
                       </button>
                       <button 
                         onClick={regenerateImage} 
@@ -319,9 +318,9 @@ const AdminDashboard: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL Pública da Imagem</label>
+                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Endereço Físico da Imagem</label>
                     <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-xs font-mono truncate cursor-not-allowed" />
-                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase">Status: Persistida em Supabase Storage</p>
+                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Persistência Garantida via Backend API</p>
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags</label>
@@ -388,7 +387,7 @@ const AdminDashboard: React.FC = () => {
                   <div className="md:w-64 h-44 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 bg-brand-obsidian relative">
                     <img src={draft.image} className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform" alt="Preview" />
                     {draft.image_source === 'upload' && (
-                      <div className="absolute bottom-4 right-4 bg-brand-cyan text-brand-obsidian px-2.5 py-1 rounded-full text-[7px] font-black uppercase tracking-widest shadow-xl">Storage</div>
+                      <div className="absolute bottom-4 right-4 bg-brand-cyan text-brand-obsidian px-2.5 py-1 rounded-full text-[7px] font-black uppercase tracking-widest shadow-xl">Persistente</div>
                     )}
                   </div>
                   <div className="flex-grow">
