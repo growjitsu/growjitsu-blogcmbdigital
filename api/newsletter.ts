@@ -11,31 +11,43 @@ export default async function handler(req: any, res: any) {
   const { email } = req.body;
 
   if (!email || !email.includes('@')) {
-    return res.status(400).json({ success: false, error: 'E-mail inválido' });
+    return res.status(400).json({ success: false, error: 'E-mail inválido. Por favor, verifique o formato.' });
   }
 
   const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
-  // Use the service role key to bypass RLS and unique constraints check
+  // Utiliza chave de serviço para bypass de RLS em operações administrativas (Newsletter)
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
 
   try {
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false
+      }
+    });
 
-    // Protocolo de Verificação: Checar se o e-mail já existe para feedback amigável
-    const { data: existing } = await supabaseAdmin
+    // Etapa 1: Verificar existência sem causar erro 406 (Not Acceptable) do PostgREST
+    // .single() gera erro se 0 linhas forem encontradas. .select() é mais seguro para checagem.
+    const { data: existing, error: checkError } = await supabaseAdmin
       .from('newsletter_subscribers')
       .select('email')
-      .eq('email', email.toLowerCase().trim())
-      .single();
+      .eq('email', email.toLowerCase().trim());
 
-    if (existing) {
+    if (checkError) {
+      // Se a tabela não existir, o erro será capturado aqui.
+      console.error("Erro na verificação da tabela newsletter_subscribers:", checkError.message);
+      throw new Error(`Falha na base de dados: ${checkError.message}`);
+    }
+
+    if (existing && existing.length > 0) {
       return res.status(200).json({ 
         success: true, 
-        message: 'Você já está em nossa lista de insiders! Fique atento às novidades.' 
+        message: 'Você já está cadastrado em nossa rede de insights!' 
       });
     }
 
-    const { error } = await supabaseAdmin
+    // Etapa 2: Inserção do novo assinante
+    const { error: insertError } = await supabaseAdmin
       .from('newsletter_subscribers')
       .insert([
         { 
@@ -44,22 +56,28 @@ export default async function handler(req: any, res: any) {
         }
       ]);
 
-    if (error) throw error;
+    if (insertError) {
+      // Tratamento específico para erro de duplicata (Unique Constraint)
+      if (insertError.code === '23505') {
+        return res.status(200).json({ 
+          success: true, 
+          message: 'E-mail já sincronizado anteriormente.' 
+        });
+      }
+      throw insertError;
+    }
 
     return res.status(200).json({ 
       success: true, 
-      message: 'Conexão estabelecida! Você receberá nossos protocolos de elite em breve.' 
+      message: 'Inscrição confirmada! Prepare-se para conteúdos de alta autoridade.' 
     });
 
   } catch (error: any) {
-    console.error("Newsletter API Error:", error.message);
-    // Se o erro for de duplicata no banco (unique constraint), tratamos como sucesso silencioso
-    if (error.code === '23505') {
-      return res.status(200).json({ 
-        success: true, 
-        message: 'E-mail já cadastrado. Sincronização mantida.' 
-      });
-    }
-    return res.status(500).json({ success: false, error: 'Falha ao processar assinatura técnica.' });
+    console.error("NEWSLETTER_SUBSCRIPTION_ERROR:", error);
+    // Retorna a mensagem real do erro para o frontend conseguir identificar o problema exato (ex: Tabela não encontrada)
+    return res.status(500).json({ 
+      success: false, 
+      error: `Erro ao processar assinatura: ${error.message || 'Falha técnica desconhecida.'}` 
+    });
   }
 }
