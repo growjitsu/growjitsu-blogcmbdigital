@@ -12,9 +12,9 @@ export default async function handler(req: any, res: any) {
 
   const { themes, action, title, customPrompt, category } = req.body;
   
-  // Credenciais sincronizadas
   const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
+  const BUCKET_NAME = 'blog-images';
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -25,11 +25,11 @@ export default async function handler(req: any, res: any) {
         const buffer = Buffer.from(base64Data, 'base64');
         const fileName = `${name}-${Date.now()}.png`;
         const { error } = await supabaseAdmin.storage
-          .from('blog-images')
+          .from(BUCKET_NAME)
           .upload(`ai/${fileName}`, buffer, { contentType: 'image/png', upsert: true });
         
         if (error) throw error;
-        const { data: { publicUrl } } = supabaseAdmin.storage.from('blog-images').getPublicUrl(`ai/${fileName}`);
+        const { data: { publicUrl } } = supabaseAdmin.storage.from(BUCKET_NAME).getPublicUrl(`ai/${fileName}`);
         return publicUrl;
       } catch (e) {
         console.error("Storage AI Error:", e);
@@ -38,7 +38,7 @@ export default async function handler(req: any, res: any) {
     };
 
     if (action === 'regenerate_image') {
-      const finalImagePrompt = customPrompt || `Create a professional, modern, and sophisticated editorial image representing: '${title}'. NO TEXT, high-end visual standards.`;
+      const finalImagePrompt = customPrompt || `Create a professional, modern, and sophisticated editorial image representing: '${title}'. NO TEXT.`;
 
       const imageResponse = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -60,15 +60,11 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ success: true, image: imageUrl });
     }
 
-    const promptTemas = themes && themes.length > 0 
-      ? `Gere 1 artigo épico e único para cada um destes temas específicos: ${themes.join(", ")}.`
-      : "Gere 3 artigos épicos e distintos sobre as maiores tendências de IA e Tecnologia no Brasil para 2025.";
-
     const curatorResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: promptTemas,
+      contents: themes && themes.length > 0 ? `Gere 1 artigo sobre: ${themes.join(", ")}.` : "Gere 3 artigos épicos de tecnologia.",
       config: {
-        systemInstruction: "Você é o Editor-Chefe Sênior da CMBDIGITAL. OBRIGATÓRIO: Conteúdo 100% em Português (pt-BR). Linguagem natural, profissional e otimizada para SEO. Gere títulos impactantes e rascunhos profundos. Forneça rascunhos em JSON.",
+        systemInstruction: "Editor-Chefe CMBDIGITAL. JSON pt-BR.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,

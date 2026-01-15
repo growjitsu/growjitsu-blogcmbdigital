@@ -67,11 +67,10 @@ const AdminDashboard: React.FC = () => {
   const generateDailyPosts = async () => {
     setIsGenerating(true);
     setLogs([]);
-    addLog("Iniciando Protocolo de Curadoria (PT-BR)...");
+    addLog("Iniciando Protocolo de Curadoria...");
     const themesList = themes.split('\n').filter(t => t.trim() !== '');
 
     try {
-      addLog("Solicitando geração de rascunhos e imagens...");
       const response = await fetch('/api/curadoria', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -85,7 +84,7 @@ const AdminDashboard: React.FC = () => {
       setDrafts(updatedDrafts);
       localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
       setThemes('');
-      addLog(`Sucesso: ${newArticles.length} rascunhos aguardando revisão.`);
+      addLog(`Sucesso: ${newArticles.length} rascunhos gerados.`);
     } catch (error: any) {
       addLog(`FALHA: ${error.message}`);
     } finally {
@@ -103,7 +102,7 @@ const AdminDashboard: React.FC = () => {
     setDrafts(updatedDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(updatedDrafts));
     setEditingArticle(null);
-    addLog("Alterações salvas e persistidas localmente.");
+    addLog("Rascunho atualizado localmente.");
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -111,12 +110,12 @@ const AdminDashboard: React.FC = () => {
     if (!file || !editingArticle) return;
 
     if (file.size > 2 * 1024 * 1024) {
-      alert("Erro: O arquivo excede o limite de 2MB.");
+      alert("Erro: Limite de 2MB.");
       return;
     }
 
     setIsUploading(true);
-    addLog(`Enviando para Storage via Backend (Proxy Admin)...`);
+    addLog(`Enviando imagem via Proxy Administrativo...`);
 
     try {
       const fileExt = file.name.split('.').pop();
@@ -134,7 +133,7 @@ const AdminDashboard: React.FC = () => {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.reason || data.error || "Falha crítica na autorização do storage.");
+        throw new Error(data.reason || data.error || "Erro de permissão no Storage.");
       }
 
       setEditingArticle({ 
@@ -143,12 +142,11 @@ const AdminDashboard: React.FC = () => {
         image_source: 'upload' 
       });
       
-      addLog("SUCESSO: Imagem persistida com Service Role.");
+      addLog("SUCESSO: Imagem persistida com bypass RLS.");
       
     } catch (error: any) {
-      console.error("ERRO DE UPLOAD:", error);
-      addLog(`FALHA: ${error.message}`);
-      alert(`Erro no Storage:\n\n${error.message}\n\nVerifique as variáveis de ambiente no servidor.`);
+      addLog(`FALHA NO STORAGE: ${error.message}`);
+      alert(`Erro crítico no Storage:\n\n${error.message}\n\n1. Verifique se o bucket 'blog-images' existe.\n2. Verifique se a chave Service Role está correta no backend.`);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -176,21 +174,19 @@ const AdminDashboard: React.FC = () => {
           image: data.image, 
           image_source: 'ai' 
         });
-        addLog("Nova imagem persistida no storage.");
+        addLog("Nova imagem persistida.");
       } else {
         throw new Error(data.error);
       }
     } catch (error: any) {
-      addLog(`Erro na imagem: ${error.message}`);
+      addLog(`Erro: ${error.message}`);
     } finally {
       setIsRegeneratingImage(false);
     }
   };
 
   const publishArticle = (id: string) => {
-    if (editingArticle && editingArticle.id === id) {
-      saveEdit();
-    }
+    if (editingArticle && editingArticle.id === id) saveEdit();
     
     const articleToPublish = drafts.find(d => d.id === id) || (editingArticle?.id === id ? editingArticle : null);
     if (!articleToPublish) return;
@@ -203,13 +199,13 @@ const AdminDashboard: React.FC = () => {
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
     
-    addLog("SUCESSO: Artigo publicado e imagem persistida.");
-    alert("Publicado com sucesso!");
+    addLog("Artigo publicado com sucesso.");
+    alert("Publicado!");
     if (editingArticle?.id === id) setEditingArticle(null);
   };
 
   const deleteDraft = (id: string) => {
-    if (!confirm("Excluir este rascunho permanentemente?")) return;
+    if (!confirm("Excluir?")) return;
     const remaining = drafts.filter(d => d.id !== id);
     setDrafts(remaining);
     localStorage.setItem('cmb_drafts', JSON.stringify(remaining));
@@ -239,7 +235,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2 text-white">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Garantida via Backend (Service Role)</p>
+            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Garantida (Service Role)</p>
           </div>
           <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
         </div>
@@ -252,39 +248,22 @@ const AdminDashboard: React.FC = () => {
               {isUploading && (
                 <div className="absolute inset-0 bg-brand-obsidian/80 z-[110] flex flex-col items-center justify-center rounded-[3rem] backdrop-blur-sm">
                   <div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
-                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan animate-pulse text-center px-6">Bypass RLS: Salvando imagem definitiva...</p>
+                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan animate-pulse text-center">Bypass RLS: Validando Bucket 'blog-images'...</p>
                 </div>
               )}
 
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Revisão Editorial</h2>
-                  {editingArticle.image_source === 'upload' && (
-                    <span className="text-[8px] bg-brand-cyan/20 text-brand-cyan px-2 py-0.5 rounded-full border border-brand-cyan/30 uppercase font-black tracking-widest">Persistência Garantida</span>
-                  )}
-                </div>
+                <h2 className="text-3xl font-black uppercase tracking-tighter text-brand-cyan">Revisão Editorial</h2>
                 <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white transition-colors text-3xl">×</button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-6">
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Título do Post</label>
-                    <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Subtítulo (Excerpt)</label>
-                    <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-24" />
-                  </div>
+                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" placeholder="Título" />
+                  <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-24" placeholder="Resumo" />
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Categoria</label>
-                      <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Slug (URL)</label>
-                      <input type="text" value={editingArticle.slug} onChange={(e) => setEditingArticle({...editingArticle, slug: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
-                    </div>
+                    <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none" placeholder="Categoria" />
+                    <input type="text" value={editingArticle.slug} onChange={(e) => setEditingArticle({...editingArticle, slug: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none" placeholder="Slug" />
                   </div>
                 </div>
 
@@ -292,118 +271,50 @@ const AdminDashboard: React.FC = () => {
                   <div className="rounded-2xl overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-2xl">
                     <img src={editingArticle.image} className="w-full h-full object-cover" alt="Editor" />
                     <div className="absolute inset-0 bg-brand-obsidian/80 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-4 p-4">
-                      <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full max-w-[220px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
-                      >
-                        📤 Upload Manual
-                      </button>
-                      <button 
-                        onClick={regenerateImage} 
-                        disabled={isRegeneratingImage}
-                        className="w-full max-w-[220px] bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
-                      >
-                        {isRegeneratingImage ? 'Regenerando...' : '🔄 Regenerar via IA'}
-                      </button>
+                      <button onClick={() => fileInputRef.current?.click()} className="w-full max-w-[220px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest">📤 Upload Manual</button>
+                      <button onClick={regenerateImage} disabled={isRegeneratingImage} className="w-full max-w-[220px] bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest">🔄 IA Image</button>
                     </div>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      className="hidden" 
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={handleImageUpload}
-                    />
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL Pública Persistente</label>
-                    <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-xs font-mono truncate cursor-not-allowed" />
-                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Protegido via Backend (Service Role)</p>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags</label>
-                    <input type="text" value={editingArticle.tags.join(', ')} onChange={(e) => setEditingArticle({...editingArticle, tags: e.target.value.split(',').map(t => t.trim())})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan" />
-                  </div>
+                  <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-[10px] font-mono truncate" />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Conteúdo</label>
-                <textarea 
-                  value={editingArticle.content} 
-                  onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} 
-                  className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-64 font-mono text-sm leading-relaxed" 
-                />
-              </div>
+              <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 outline-none focus:border-brand-cyan h-64 font-mono text-sm" placeholder="Conteúdo HTML/Markdown" />
 
               <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-brand-graphite">
-                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:border-brand-muted transition-all">Salvar Revisão</button>
-                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-2xl">Aprovar & Publicar</button>
+                <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-5 rounded-2xl font-black uppercase tracking-widest">Salvar</button>
+                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest">🚀 Publicar</button>
               </div>
             </div>
           </div>
         )}
 
+        {/* GRID DE RASCUNHOS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 mb-12">
-          <div className="lg:col-span-2 space-y-8">
-            <div className="p-8 rounded-[2.5rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-xl">
-              <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Fila de Geração</label>
-              <textarea 
-                value={themes}
-                onChange={(e) => setThemes(e.target.value)}
-                className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm font-medium focus:border-brand-cyan outline-none transition-all placeholder:text-brand-muted/30"
-                placeholder="Insira os temas estratégicos..."
-                rows={3}
-              />
-              <button 
-                onClick={generateDailyPosts} 
-                disabled={isGenerating} 
-                className={`w-full mt-6 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all shadow-2xl ${isGenerating ? 'bg-brand-graphite cursor-not-allowed' : 'bg-brand-cyan text-brand-obsidian hover:scale-[1.01]'}`}
-              >
-                {isGenerating ? 'Processando Protocolo...' : 'Gerar Novos Rascunhos'}
-              </button>
-            </div>
+          <div className="lg:col-span-2 p-8 rounded-[2.5rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-xl">
+            <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none" placeholder="Temas..." rows={3} />
+            <button onClick={generateDailyPosts} disabled={isGenerating} className="w-full mt-6 py-5 rounded-2xl font-black text-xs uppercase bg-brand-cyan text-brand-obsidian">{isGenerating ? 'Gerando...' : 'Gerar Posts'}</button>
           </div>
-
-          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 shadow-inner flex flex-col">
-            <span className="mb-4 pb-2 border-b border-brand-graphite/30 uppercase font-black opacity-50 tracking-widest">Logs Operacionais</span>
-            <div className="flex-grow overflow-y-auto max-h-[220px]">
-              {logs.length === 0 ? '> Sistema pronto...' : logs.map((log, i) => <div key={i} className="mb-1 animate-fade-in">{log}</div>)}
-            </div>
+          <div className="p-8 rounded-[2.5rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 overflow-y-auto max-h-[200px]">
+            {logs.map((l, i) => <div key={i}>{l}</div>)}
           </div>
         </div>
 
-        <div className="space-y-10">
-          <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6">Aguardando Validação ({drafts.length})</h2>
-          
-          {drafts.length === 0 ? (
-            <div className="py-24 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted italic opacity-50">Nenhum rascunho pendente de revisão física.</div>
-          ) : (
-            <div className="grid grid-cols-1 gap-8">
-              {drafts.map(draft => (
-                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-10 hover:border-brand-cyan/40 transition-all group">
-                  <div className="md:w-64 h-44 rounded-[2rem] overflow-hidden border border-brand-graphite shrink-0 bg-brand-obsidian relative">
-                    <img src={draft.image} className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform" alt="Preview" />
-                    {draft.image_source === 'upload' && (
-                      <div className="absolute bottom-4 right-4 bg-brand-cyan text-brand-obsidian px-2.5 py-1 rounded-full text-[7px] font-black uppercase tracking-widest shadow-xl">Persistente</div>
-                    )}
-                  </div>
-                  <div className="flex-grow">
-                    <div className="flex justify-between items-start mb-4">
-                      <span className="text-brand-purple font-black text-[9px] uppercase tracking-widest px-3 py-1 rounded-full bg-brand-purple/10 border border-brand-purple/20">{draft.category}</span>
-                      <span className="text-brand-muted font-mono text-[10px]">{draft.date}</span>
-                    </div>
-                    <h3 className="text-2xl font-black mb-4 tracking-tighter text-white">{draft.title}</h3>
-                    <p className="text-brand-muted text-sm line-clamp-2 mb-8">{draft.excerpt}</p>
-                    <div className="flex flex-wrap gap-4">
-                      <button onClick={() => startEditing(draft)} className="px-8 py-3.5 rounded-2xl bg-white text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-cyan transition-all">✏️ Revisar & Salvar</button>
-                      <button onClick={() => publishArticle(draft.id)} className="px-8 py-3.5 rounded-2xl bg-brand-cyan text-brand-obsidian font-black text-[10px] uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-lg shadow-brand-cyan/10">🚀 Publicar</button>
-                      <button onClick={() => deleteDraft(draft.id)} className="px-8 py-3.5 rounded-2xl border border-brand-graphite text-brand-muted font-black text-[10px] uppercase tracking-widest hover:border-red-500 hover:text-red-500 transition-all">🗑️ Descartar</button>
-                    </div>
-                  </div>
+        <div className="space-y-8">
+          {drafts.map(draft => (
+            <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8">
+              <img src={draft.image} className="md:w-48 h-32 rounded-2xl object-cover bg-brand-obsidian" />
+              <div className="flex-grow">
+                <h3 className="text-xl font-black mb-2 text-white">{draft.title}</h3>
+                <div className="flex gap-3">
+                  <button onClick={() => startEditing(draft)} className="text-[10px] font-black uppercase tracking-widest bg-white text-brand-obsidian px-4 py-2 rounded-lg">Editar</button>
+                  <button onClick={() => publishArticle(draft.id)} className="text-[10px] font-black uppercase tracking-widest bg-brand-cyan text-brand-obsidian px-4 py-2 rounded-lg">Publicar</button>
+                  <button onClick={() => deleteDraft(draft.id)} className="text-[10px] font-black uppercase tracking-widest border border-brand-graphite text-brand-muted px-4 py-2 rounded-lg">Excluir</button>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
     </div>
