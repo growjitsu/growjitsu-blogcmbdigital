@@ -19,7 +19,6 @@ const AdminDashboard: React.FC = () => {
   const [drafts, setDrafts] = useState<Article[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
 
-  // Estado para Edição Manual
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -117,27 +116,25 @@ const AdminDashboard: React.FC = () => {
     }
 
     setIsUploading(true);
-    addLog(`Enviando para API de Persistência: ${file.name}...`);
+    addLog(`Enviando para API de Persistência (Service Role): ${file.name}...`);
 
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${editingArticle.slug || 'post'}-${Date.now()}.${fileExt}`;
 
-      // Chamada para a nova API de Upload (Backend)
-      // Passamos o arquivo diretamente no body e metadados nos headers
       const response = await fetch('/api/upload', {
         method: 'POST',
         headers: {
           'x-file-name': fileName,
           'content-type': file.type,
         },
-        body: file // Envia o binário
+        body: file
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.reason || data.error || "Erro desconhecido no upload.");
+        throw new Error(data.reason || data.error || "Erro de permissão ou configuração no storage.");
       }
 
       setEditingArticle({ 
@@ -146,12 +143,12 @@ const AdminDashboard: React.FC = () => {
         image_source: 'upload' 
       });
       
-      addLog("SUCESSO: Imagem salva fisicamente no Storage.");
+      addLog("SUCESSO: Imagem persistida via Service Role Key.");
       
     } catch (error: any) {
       console.error("ERRO DE UPLOAD:", error);
-      addLog(`FALHA NO STORAGE: ${error.message}`);
-      alert(`Erro de Permissão ou Configuração:\n${error.message}\n\nCertifique-se de que a variável SUPABASE_SERVICE_ROLE_KEY está configurada no seu ambiente.`);
+      addLog(`FALHA: ${error.message}`);
+      alert(`Erro no Storage:\n${error.message}\n\nCertifique-se que a variável SUPABASE_SERVICE_ROLE_KEY está configurada corretamente no ambiente de produção.`);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -161,7 +158,7 @@ const AdminDashboard: React.FC = () => {
   const regenerateImage = async () => {
     if (!editingArticle) return;
     setIsRegeneratingImage(true);
-    addLog("Regenerando imagem via IA (Protocolo Único)...");
+    addLog("Regenerando imagem via IA...");
     try {
       const response = await fetch('/api/curadoria', {
         method: 'POST',
@@ -206,7 +203,7 @@ const AdminDashboard: React.FC = () => {
     setDrafts(remainingDrafts);
     localStorage.setItem('cmb_drafts', JSON.stringify(remainingDrafts));
     
-    addLog("SUCESSO: Artigo publicado com URL persistente.");
+    addLog("SUCESSO: Artigo publicado e imagem persistida.");
     alert("Publicado com sucesso!");
     if (editingArticle?.id === id) setEditingArticle(null);
   };
@@ -242,7 +239,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2 text-white">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Server-Side Ativa</p>
+            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Garantida via Backend</p>
           </div>
           <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
         </div>
@@ -299,7 +296,7 @@ const AdminDashboard: React.FC = () => {
                         onClick={() => fileInputRef.current?.click()}
                         className="w-full max-w-[220px] bg-white text-brand-obsidian px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
                       >
-                        📤 Upload (Bypass RLS)
+                        📤 Upload Manual
                       </button>
                       <button 
                         onClick={regenerateImage} 
@@ -318,9 +315,9 @@ const AdminDashboard: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Endereço Físico da Imagem</label>
+                    <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL Pública Persistente</label>
                     <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-xs font-mono truncate cursor-not-allowed" />
-                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Persistência Garantida via Backend API</p>
+                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Protegido via SUPABASE_SERVICE_ROLE_KEY</p>
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags</label>
@@ -330,7 +327,7 @@ const AdminDashboard: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Corpo do Artigo</label>
+                <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Conteúdo</label>
                 <textarea 
                   value={editingArticle.content} 
                   onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} 
@@ -340,7 +337,7 @@ const AdminDashboard: React.FC = () => {
 
               <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-brand-graphite">
                 <button onClick={saveEdit} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:border-brand-muted transition-all">Salvar Revisão</button>
-                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-2xl">Aprovar & Publicar Agora</button>
+                <button onClick={() => publishArticle(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-brand-purple hover:text-white transition-all shadow-2xl">Aprovar & Publicar</button>
               </div>
             </div>
           </div>
@@ -376,7 +373,7 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="space-y-10">
-          <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6">Aguardando Validação Editorial ({drafts.length})</h2>
+          <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6">Aguardando Validação ({drafts.length})</h2>
           
           {drafts.length === 0 ? (
             <div className="py-24 text-center border-2 border-dashed border-brand-graphite rounded-[3rem] text-brand-muted italic opacity-50">Nenhum rascunho pendente de revisão física.</div>
