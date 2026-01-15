@@ -116,7 +116,7 @@ const AdminDashboard: React.FC = () => {
     }
 
     setIsUploading(true);
-    addLog(`Enviando para API de Persistência (Service Role): ${file.name}...`);
+    addLog(`Enviando para Storage via Backend (Proxy Admin)...`);
 
     try {
       const fileExt = file.name.split('.').pop();
@@ -134,7 +134,7 @@ const AdminDashboard: React.FC = () => {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.reason || data.error || "Erro de permissão ou configuração no storage.");
+        throw new Error(data.reason || data.error || "Falha crítica na autorização do storage.");
       }
 
       setEditingArticle({ 
@@ -143,12 +143,12 @@ const AdminDashboard: React.FC = () => {
         image_source: 'upload' 
       });
       
-      addLog("SUCESSO: Imagem persistida via Service Role Key.");
+      addLog("SUCESSO: Imagem persistida com Service Role.");
       
     } catch (error: any) {
       console.error("ERRO DE UPLOAD:", error);
       addLog(`FALHA: ${error.message}`);
-      alert(`Erro no Storage:\n${error.message}\n\nCertifique-se que a variável SUPABASE_SERVICE_ROLE_KEY está configurada corretamente no ambiente de produção.`);
+      alert(`Erro de Configuração Supabase:\n\n${error.message}\n\nIMPORTANTE: Se você já adicionou a chave na Vercel, você PRECISA fazer um REDEPLOY manual para que as mudanças entrem em vigor.`);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -176,7 +176,7 @@ const AdminDashboard: React.FC = () => {
           image: data.image, 
           image_source: 'ai' 
         });
-        addLog("Nova imagem de IA vinculada.");
+        addLog("Nova imagem persistida no storage.");
       } else {
         throw new Error(data.error);
       }
@@ -239,7 +239,7 @@ const AdminDashboard: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
             <h1 className="text-5xl font-black tracking-tighter uppercase mb-2 text-white">Motor <span className="text-brand-cyan">Editorial</span></h1>
-            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Garantida via Backend</p>
+            <p className="text-brand-muted font-mono text-xs uppercase tracking-widest">Persistência Garantida via Backend (Service Role)</p>
           </div>
           <button onClick={handleLogout} className="px-6 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:border-red-500 transition-all">Sair</button>
         </div>
@@ -252,7 +252,7 @@ const AdminDashboard: React.FC = () => {
               {isUploading && (
                 <div className="absolute inset-0 bg-brand-obsidian/80 z-[110] flex flex-col items-center justify-center rounded-[3rem] backdrop-blur-sm">
                   <div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
-                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan animate-pulse">Ignorando RLS & Salvando no Storage...</p>
+                  <p className="font-black text-xs uppercase tracking-widest text-brand-cyan animate-pulse text-center px-6">Bypass RLS: Salvando imagem definitiva...</p>
                 </div>
               )}
 
@@ -317,7 +317,7 @@ const AdminDashboard: React.FC = () => {
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">URL Pública Persistente</label>
                     <input type="text" value={editingArticle.image} readOnly className="w-full bg-brand-obsidian border border-brand-graphite rounded-xl px-5 py-4 text-brand-muted text-xs font-mono truncate cursor-not-allowed" />
-                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Protegido via SUPABASE_SERVICE_ROLE_KEY</p>
+                    <p className="text-[8px] mt-2 text-brand-cyan font-bold uppercase tracking-wider">🔒 Protegido via SUPABASE_SERVICE_ROLE_KEY (Server-side)</p>
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest mb-3 opacity-50">Tags</label>

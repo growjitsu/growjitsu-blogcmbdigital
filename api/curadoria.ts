@@ -1,5 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
+import { createClient } from '@supabase/supabase-js';
+import { Buffer } from 'buffer';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Content-Type', 'application/json');
@@ -9,9 +11,31 @@ export default async function handler(req: any, res: any) {
   }
 
   const { themes, action, title, customPrompt, category } = req.body;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Helper para salvar no storage se tiver chaves
+    const saveToStorage = async (base64Data: string, name: string): Promise<string | null> => {
+      if (!supabaseUrl || !supabaseServiceKey) return null;
+      try {
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+        const buffer = Buffer.from(base64Data, 'base64');
+        const fileName = `${name}-${Date.now()}.png`;
+        const { error } = await supabaseAdmin.storage
+          .from('blog-images')
+          .upload(`ai/${fileName}`, buffer, { contentType: 'image/png', upsert: true });
+        
+        if (error) throw error;
+        const { data: { publicUrl } } = supabaseAdmin.storage.from('blog-images').getPublicUrl(`ai/${fileName}`);
+        return publicUrl;
+      } catch (e) {
+        console.error("Storage AI Error:", e);
+        return null;
+      }
+    };
 
     // MODO: REGENERAR APENAS IMAGEM
     if (action === 'regenerate_image') {
@@ -19,21 +43,16 @@ export default async function handler(req: any, res: any) {
 
       const imageResponse = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: finalImagePrompt }]
-        },
-        config: {
-          imageConfig: {
-            aspectRatio: "16:9"
-          }
-        }
+        contents: { parts: [{ text: finalImagePrompt }] },
+        config: { imageConfig: { aspectRatio: "16:9" } }
       });
 
       let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(category || "tech")}`;
       if (imageResponse.candidates?.[0]?.content?.parts) {
         for (const part of imageResponse.candidates[0].content.parts) {
           if (part.inlineData) {
-            imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            const storedUrl = await saveToStorage(part.inlineData.data, title.toLowerCase().replace(/\s+/g, '-'));
+            imageUrl = storedUrl || `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
             break;
           }
         }
@@ -42,7 +61,7 @@ export default async function handler(req: any, res: any) {
       return res.status(200).json({ success: true, image: imageUrl });
     }
 
-    // MODO: GERAÇÃO DE ARTIGOS (CURADORIA PADRÃO)
+    // MODO: GERAÇÃO DE ARTIGOS
     const promptTemas = themes && themes.length > 0 
       ? `Gere 1 artigo épico e único para cada um destes temas específicos: ${themes.join(", ")}.`
       : "Gere 3 artigos épicos e distintos sobre as maiores tendências de IA e Tecnologia no Brasil para 2025.";
@@ -83,7 +102,7 @@ export default async function handler(req: any, res: any) {
 
     const articlesWithImages = await Promise.all(rawArticles.map(async (art: any) => {
       try {
-        const finalImagePrompt = `Create a professional editorial image representing: '${art.title}'. Visual context: ${art.promptImagem}. Style: Clean, technological, high-end, NO TEXT, NO LOGOS.`;
+        const finalImagePrompt = `Create a professional editorial image representing: '${art.title}'. Style: Clean, technological, high-end, NO TEXT.`;
         const imageResponse = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
           contents: { parts: [{ text: finalImagePrompt }] },
@@ -94,7 +113,8 @@ export default async function handler(req: any, res: any) {
         if (imageResponse.candidates?.[0]?.content?.parts) {
           for (const part of imageResponse.candidates[0].content.parts) {
             if (part.inlineData) {
-              imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+              const storedUrl = await saveToStorage(part.inlineData.data, art.slug);
+              imageUrl = storedUrl || `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
               break;
             }
           }

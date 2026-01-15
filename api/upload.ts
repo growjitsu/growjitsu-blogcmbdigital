@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export const config = {
   api: {
-    bodyParser: false, // Necessário para processar o stream binário manualmente
+    bodyParser: false, // Desativa o parser para lidar com stream binário
   },
 };
 
@@ -13,24 +13,33 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Método não permitido' });
   }
 
-  // 1. Diagnóstico de Ambiente (Executado apenas no servidor)
-  const supabaseUrl = process.env.SUPABASE_URL || 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
+  // 1. Extração de Variáveis de Ambiente (Prioridade Total para Env Vars)
+  const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseServiceKey) {
-    console.error("CRITICAL ERROR: SUPABASE_SERVICE_ROLE_KEY is missing in environment variables.");
+  // Diagnóstico Crítico
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error("ERRO DE CONFIGURAÇÃO BACKEND:");
+    console.error("- SUPABASE_URL:", supabaseUrl ? "OK" : "AUSENTE");
+    console.error("- SUPABASE_SERVICE_ROLE_KEY:", supabaseServiceKey ? "OK" : "AUSENTE");
+    
     return res.status(500).json({ 
       success: false, 
-      error: "Erro de Permissão no Servidor", 
-      reason: "A chave de serviço (Service Role Key) é necessária para ignorar erros de permissão de RLS." 
+      error: "Ambiente não configurado", 
+      reason: "As variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY devem ser configuradas na Vercel e o projeto deve ser REDEPLOYED." 
     });
   }
 
   try {
-    // 2. Inicialização do Cliente com Service Role (Privilégios de Admin)
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    // 2. Cliente com Service Role (Privilégios Administrativos - Ignora RLS)
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
 
-    // 3. Processamento do Stream de Dados
+    // 3. Coleta do Stream Binário
     const chunks: any[] = [];
     req.on('data', (chunk: any) => chunks.push(chunk));
     
@@ -41,33 +50,33 @@ export default async function handler(req: any, res: any) {
     
     const buffer = Buffer.concat(chunks);
     
-    // Metadados passados via Headers para evitar parsing complexo de multipart
+    // Metadados passados via Headers para simplicidade
     const fileName = req.headers['x-file-name'] || `upload-${Date.now()}.webp`;
     const contentType = req.headers['content-type'] || 'image/webp';
 
-    // 4. Upload Físico (Bypass RLS via Service Role)
-    const { data, error: uploadError } = await supabase.storage
+    // 4. Upload para o Bucket 'blog-images'
+    const { data, error: uploadError } = await supabaseAdmin.storage
       .from('blog-images')
       .upload(`posts/${fileName}`, buffer, {
         contentType,
-        upsert: true // Permite substituir se o nome for idêntico
+        upsert: true
       });
 
     if (uploadError) {
-      console.error('SUPABASE STORAGE ERROR:', uploadError.message);
+      console.error('SUPABASE STORAGE ERROR (Service Role Attempt):', uploadError.message);
       return res.status(500).json({ 
         success: false, 
-        error: "Falha ao gravar no bucket", 
+        error: "Erro no Storage do Supabase", 
         reason: uploadError.message 
       });
     }
 
-    // 5. Geração de URL Pública Permanente
-    const { data: { publicUrl } } = supabase.storage
+    // 5. URL Pública
+    const { data: { publicUrl } } = supabaseAdmin.storage
       .from('blog-images')
       .getPublicUrl(`posts/${fileName}`);
 
-    console.log(`Upload bem-sucedido: ${fileName}`);
+    console.log(`Upload concluído via Service Role: ${fileName}`);
 
     return res.status(200).json({ 
       success: true, 
@@ -75,10 +84,10 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("INTERNAL UPLOAD ERROR:", error.message);
+    console.error("INTERNAL API ERROR:", error.message);
     return res.status(500).json({ 
       success: false, 
-      error: "Erro interno no processo de upload",
+      error: "Falha interna no servidor de upload",
       details: error.message
     });
   }
