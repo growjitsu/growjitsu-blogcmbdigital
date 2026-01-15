@@ -7,23 +7,41 @@ import { Article } from '../types';
 
 const ITEMS_PER_PAGE = 15;
 
-// Helper para converter data PT-BR em objeto Date comparável
+// Helper global e robusto para converter datas do blog em objetos Date comparáveis
 const parseDate = (dateStr: string) => {
+  if (!dateStr) return new Date(0);
+  
   const months: { [key: string]: number } = {
     'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
     'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
   };
   
-  const cleanStr = dateStr.toLowerCase().replace(' de ', ' ');
-  const parts = cleanStr.split(' ');
-  
-  if (parts.length === 3) {
-    const day = parseInt(parts[0]);
-    const month = months[parts[1].replace(',', '')];
-    const year = parseInt(parts[2]);
-    return new Date(year, month, day);
+  try {
+    // Normaliza a string: remove " de ", vírgulas e espaços extras
+    const cleanStr = dateStr.toLowerCase()
+      .replace(/ de /g, ' ')
+      .replace(/,/g, '')
+      .trim();
+    
+    const parts = cleanStr.split(/\s+/);
+    
+    // Formato esperado: "10 Junho 2025"
+    if (parts.length >= 3) {
+      const day = parseInt(parts[0]);
+      const month = months[parts[1]];
+      const year = parseInt(parts[2]);
+      
+      if (!isNaN(day) && month !== undefined && !isNaN(year)) {
+        return new Date(year, month, day);
+      }
+    }
+    
+    // Fallback para ISO ou outros formatos padrão
+    const fallbackDate = new Date(dateStr);
+    return isNaN(fallbackDate.getTime()) ? new Date(0) : fallbackDate;
+  } catch (e) {
+    return new Date(0);
   }
-  return new Date(dateStr); // Fallback para ISO
 };
 
 const Home: React.FC = () => {
@@ -32,18 +50,16 @@ const Home: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
-    // 1. Unificação: Pegar publicados do storage
-    const publishedInStorage = JSON.parse(localStorage.getItem('cmb_published') || '[]');
+    // 1. Unificação: Pegar publicados do storage (posts novos e editados)
+    const publishedInStorage: Article[] = JSON.parse(localStorage.getItem('cmb_published') || '[]');
     
-    // 2. Mesclagem: Filtrar estáticos que já foram "sobrescritos" no storage (baseado no slug)
-    const storageSlugs = new Set(publishedInStorage.map((a: Article) => a.slug));
+    // 2. Mesclagem Segura: Filtrar posts estáticos que já foram editados/sobrescritos no storage
+    const storageSlugs = new Set(publishedInStorage.map(a => a.slug));
     const filteredStatic = STATIC_ARTICLES.filter(a => !storageSlugs.has(a.slug));
     
-    // 3. Unir e Ordenar (Mais novos primeiro)
+    // 3. Ordem Cronológica Rigorosa: Mais recentes sempre no topo
     const combined = [...publishedInStorage, ...filteredStatic].sort((a, b) => {
-      const dateA = parseDate(a.date).getTime();
-      const dateB = parseDate(b.date).getTime();
-      return dateB - dateA;
+      return parseDate(b.date).getTime() - parseDate(a.date).getTime();
     });
 
     setAllArticles(combined);
@@ -61,19 +77,20 @@ const Home: React.FC = () => {
     );
   }, [allArticles, searchQuery]);
 
-  // Paginação
+  // Paginação Baseada na Ordem Cronológica
   const totalPages = Math.ceil(filteredArticles.length / ITEMS_PER_PAGE);
   const currentArticles = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     return filteredArticles.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [filteredArticles, currentPage]);
 
-  // Destaque Dinâmico: Sempre o post mais recente do array ordenado
+  // Destaque Dinâmico Automático: Sempre o artigo no índice 0 (o mais recente)
   const featured = allArticles[0];
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [searchQuery, currentPage]);
 
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
@@ -91,18 +108,18 @@ const Home: React.FC = () => {
         <div className="container mx-auto px-4 md:px-6 relative z-10 text-center">
           <div className="inline-flex items-center space-x-3 px-5 py-2 rounded-full mb-10 shadow-xl dark:bg-brand-graphite dark:border-brand-graphite bg-slate-50 border border-slate-200">
             <span className="flex h-2 w-2 rounded-full bg-brand-cyan animate-pulse"></span>
-            <span className="text-[10px] font-black uppercase tracking-[0.3em] dark:text-brand-soft text-slate-600">Sincronização em Tempo Real Ativa</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] dark:text-brand-soft text-slate-600">Sincronização Cronológica Ativa</span>
           </div>
           <h1 className="text-6xl md:text-9xl font-black mb-12 tracking-tighter leading-[0.85] dark:text-brand-soft text-slate-900">
             O Hub da <br/> <span className="text-brand-cyan font-serif italic font-light lowercase">autoridade digital.</span>
           </h1>
           <button onClick={() => scrollToSection('protocolos')} className="group bg-brand-cyan text-brand-obsidian px-14 py-6 rounded-2xl font-black text-xs uppercase tracking-[0.3em] hover:bg-brand-purple hover:text-white transition-all transform hover:-translate-y-1 shadow-2xl">
-            Ver Insights Recentes
+            Acessar Últimos Insights
           </button>
         </div>
       </section>
 
-      {/* Destaque Atual Inteligente: Sempre o primeiro post do feed ordenado */}
+      {/* Destaque Atual: Sempre o post mais recente (ID 0) */}
       {featured && currentPage === 1 && !searchQuery && (
         <section className="container mx-auto px-4 md:px-6 -mt-32 relative z-20">
           <div className="max-w-6xl mx-auto">
@@ -117,13 +134,13 @@ const Home: React.FC = () => {
                 <div className="lg:w-1/2 p-12 md:p-20 flex flex-col justify-center">
                   <span className="text-brand-cyan font-black text-[10px] uppercase tracking-[0.5em] mb-8 flex items-center">
                     <span className="w-10 h-px bg-brand-cyan mr-4"></span>
-                    Postagem mais Recente
+                    Postagem mais Recente • {featured.date}
                   </span>
                   <h2 className="text-4xl md:text-6xl font-black mb-8 leading-[1.1] tracking-tighter dark:text-brand-soft text-slate-900">
                     <Link to={`/artigo/${featured.slug}`} className="hover:text-brand-cyan transition-colors">{featured.title}</Link>
                   </h2>
                   <p className="text-xl mb-12 font-medium dark:text-brand-muted text-slate-600 line-clamp-3">{featured.excerpt}</p>
-                  <Link to={`/artigo/${featured.slug}`} className="bg-brand-purple text-white px-12 py-5 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-brand-cyan hover:text-brand-obsidian transition-all text-center self-start">Ler Artigo</Link>
+                  <Link to={`/artigo/${featured.slug}`} className="bg-brand-purple text-white px-12 py-5 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-brand-cyan hover:text-brand-obsidian transition-all text-center self-start">Ler Artigo Completo</Link>
                 </div>
              </div>
           </div>
@@ -133,16 +150,16 @@ const Home: React.FC = () => {
       <section id="protocolos" className="container mx-auto px-4 md:px-6 mt-40">
         <div className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
           <div className="max-w-xl w-full">
-            <h2 className="text-4xl font-black tracking-tighter uppercase mb-4 dark:text-brand-soft text-slate-900">Explorar <span className="text-brand-cyan">Insights.</span></h2>
+            <h2 className="text-4xl font-black tracking-tighter uppercase mb-4 dark:text-brand-soft text-slate-900">Feed de <span className="text-brand-cyan">Protocolos.</span></h2>
             <div className="relative group">
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Pesquisar..." className="w-full bg-brand-graphite/30 border border-brand-graphite/50 rounded-2xl px-14 py-5 text-sm font-medium focus:border-brand-cyan outline-none transition-all dark:text-brand-soft" />
+              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Pesquisar insight..." className="w-full bg-brand-graphite/30 border border-brand-graphite/50 rounded-2xl px-14 py-5 text-sm font-medium focus:border-brand-cyan outline-none transition-all dark:text-brand-soft" />
               <svg className="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-brand-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
             </div>
           </div>
           <div className="hidden md:flex items-center space-x-6 text-[10px] font-black uppercase tracking-[0.3em] px-8 py-3 rounded-full border dark:text-brand-muted dark:bg-brand-graphite/50 dark:border-brand-graphite text-slate-400 bg-white border-slate-200">
-             <span>Protocolos Ativos: {allArticles.length}</span>
+             <span>Ativos Verificados: {allArticles.length}</span>
              <span className="w-1.5 h-1.5 bg-brand-cyan rounded-full"></span>
-             <span>Página {currentPage}</span>
+             <span>Página {currentPage} / {totalPages || 1}</span>
           </div>
         </div>
 
@@ -153,14 +170,19 @@ const Home: React.FC = () => {
             </div>
             {totalPages > 1 && (
               <div className="mt-24 flex justify-center items-center gap-3">
-                <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase border dark:border-brand-graphite">Anterior</button>
-                <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase bg-brand-cyan text-brand-obsidian">Próximo</button>
+                <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase border dark:border-brand-graphite disabled:opacity-20 transition-all">Anterior</button>
+                <div className="flex gap-2">
+                   {[...Array(totalPages)].map((_, i) => (
+                     <button key={i} onClick={() => setCurrentPage(i+1)} className={`w-10 h-10 rounded-lg text-[10px] font-black transition-all ${currentPage === i+1 ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite/20 text-brand-muted'}`}>{i+1}</button>
+                   ))}
+                </div>
+                <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase bg-brand-cyan text-brand-obsidian disabled:opacity-20 transition-all">Próximo</button>
               </div>
             )}
           </>
         ) : (
           <div className="py-40 text-center border-2 border-dashed border-brand-graphite/30 rounded-[4rem]">
-            <h3 className="text-2xl font-black text-brand-muted">Nenhum insight localizado.</h3>
+            <h3 className="text-2xl font-black text-brand-muted">Busca sem resultados no banco de dados.</h3>
           </div>
         )}
       </section>
