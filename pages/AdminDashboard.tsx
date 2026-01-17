@@ -35,15 +35,22 @@ const AdminDashboard: React.FC = () => {
 
   const loadAllContent = async () => {
     try {
-      const resDrafts = await fetch('/api/posts?status=draft');
-      const dataDrafts = await resDrafts.json();
+      const fetchWithValidation = async (url: string) => {
+        const response = await fetch(url);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Erro de sistema' }));
+          throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+        return response.json();
+      };
+
+      const dataDrafts = await fetchWithValidation('/api/posts?status=draft');
       if (dataDrafts.success) setDrafts(dataDrafts.articles || []);
 
-      const resPub = await fetch('/api/posts?status=published');
-      const dataPub = await resPub.json();
+      const dataPub = await fetchWithValidation('/api/posts?status=published');
       if (dataPub.success) setPublishedArticles(dataPub.articles || []);
-    } catch (e) {
-      addLog("Erro de Sincronização: Falha na comunicação com o banco de dados.");
+    } catch (e: any) {
+      addLog(`Erro de Terminal: ${e.message}`);
     }
   };
 
@@ -69,25 +76,24 @@ const AdminDashboard: React.FC = () => {
         body: JSON.stringify({ themes: themes.split('\n').filter(t => t.trim()) })
       });
       
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Frequência de IA interrompida.' }));
+        throw new Error(errorData.error);
+      }
+      
       const data = await response.json();
       if (data.success) {
-        addLog(`${data.count} rascunhos gerados e persistidos no Supabase.`);
-        if (data.drafts && data.drafts.length > 0) {
-          // Garante que o frontend receba os novos rascunhos imediatamente
-          setDrafts(prev => [...data.drafts, ...prev]);
-        } else {
-          addLog("AVISO: Nenhum rascunho retornado pela API.");
-        }
+        addLog(`${data.count} rascunhos injetados na nuvem.`);
+        if (data.drafts) setDrafts(prev => [...data.drafts, ...prev]);
         setThemes('');
       } else {
-        throw new Error(data.error || "Erro técnico na geração de conteúdo.");
+        throw new Error(data.error);
       }
     } catch (error: any) { 
       addLog(`FALHA NO PROTOCOLO: ${error.message}`); 
     } finally { 
       setIsGenerating(false); 
-      // Opcional: Recarregar para garantir sincronia total
-      setTimeout(loadAllContent, 1000);
+      setTimeout(loadAllContent, 500);
     }
   };
 
@@ -98,6 +104,7 @@ const AdminDashboard: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(article)
       });
+      if (!response.ok) return false;
       const data = await response.json();
       return data.success;
     } catch (e) { return false; }
@@ -110,7 +117,7 @@ const AdminDashboard: React.FC = () => {
 
     if (!post) return;
 
-    addLog(`Lançando Protocolo: ${post.title}...`);
+    addLog(`Publicando: ${post.title}...`);
     const publishedPost: Article = { 
       ...post, 
       status: 'published' as const,
@@ -124,27 +131,29 @@ const AdminDashboard: React.FC = () => {
       setEditingArticle(null);
       setActiveMode('manage');
     } else {
-      addLog("Erro ao publicar: Verifique logs de rede.");
+      addLog("Erro na ativação do protocolo.");
     }
   };
 
   const deleteArticle = async (id: string) => {
-    if (!confirm("Confirmar deleção permanente do Banco de Dados?")) return;
+    if (!confirm("Confirmar deleção na nuvem?")) return;
     try {
       const res = await fetch(`/api/posts?id=${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
-        addLog("Protocolo removido da nuvem.");
-        loadAllContent();
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          addLog("Protocolo removido.");
+          loadAllContent();
+        }
       }
-    } catch (e) { addLog("Erro ao apagar registro."); }
+    } catch (e) { addLog("Falha na remoção."); }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editingArticle) return;
     setIsUploading(true);
-    addLog("Iniciando upload para Cloud Storage...");
+    addLog("Upload binário em curso...");
     try {
       const fileName = `${editingArticle.slug}-${Date.now()}.${file.name.split('.').pop()}`;
       const response = await fetch('/api/upload', {
@@ -152,13 +161,14 @@ const AdminDashboard: React.FC = () => {
         headers: { 'x-file-name': fileName, 'content-type': file.type },
         body: file
       });
+      if (!response.ok) throw new Error("Cloud Storage Offline");
       const data = await response.json();
-      if (!data.success) throw new Error(data.reason || "Falha no upload");
+      if (!data.success) throw new Error(data.reason);
       setEditingArticle({ ...editingArticle, image: data.image_url });
-      addLog("Imagem sincronizada com sucesso.");
+      addLog("Arte sincronizada.");
     } catch (e: any) { 
       alert(e.message); 
-      addLog(`Erro no Storage: ${e.message}`);
+      addLog(`Erro Storage: ${e.message}`);
     } finally { 
       setIsUploading(false); 
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -171,10 +181,10 @@ const AdminDashboard: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-obsidian px-4">
         <form onSubmit={handleLogin} className="p-10 rounded-[3rem] bg-brand-graphite border border-brand-graphite shadow-2xl space-y-8 w-full max-w-md text-center">
-          <h1 className="text-3xl font-black text-white uppercase tracking-tighter">Terminal de Dados</h1>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 text-white outline-none focus:border-brand-cyan" placeholder="E-mail" required />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 text-white outline-none focus:border-brand-cyan" placeholder="Senha" required />
-          <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-brand-cyan/20 transition-all active:scale-95">{isLoggingIn ? 'Autenticando...' : 'Acessar Terminal'}</button>
+          <h1 className="text-3xl font-black text-white uppercase tracking-tighter">Terminal Dados</h1>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 text-white outline-none focus:border-brand-cyan" placeholder="E-mail Corporativo" required />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 text-white outline-none focus:border-brand-cyan" placeholder="Código de Acesso" required />
+          <button type="submit" disabled={isLoggingIn} className="w-full bg-brand-cyan text-brand-obsidian py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-brand-cyan/20 active:scale-95 transition-all">{isLoggingIn ? 'Sincronizando...' : 'Conectar Terminal'}</button>
         </form>
       </div>
     );
@@ -185,49 +195,47 @@ const AdminDashboard: React.FC = () => {
       <div className="container mx-auto px-4 max-w-6xl">
         <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
           <div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase text-white">Centro de <span className="text-brand-cyan">Curation</span></h1>
+            <h1 className="text-5xl font-black tracking-tighter uppercase text-white">Central de <span className="text-brand-cyan">Protocolos</span></h1>
             <div className="flex gap-4 mt-6">
               <button onClick={() => setActiveMode('generate')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'generate' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Curadoria IA</button>
-              <button onClick={() => setActiveMode('manage')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'manage' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Live Database ({publishedArticles.length})</button>
+              <button onClick={() => setActiveMode('manage')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'manage' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Database Live ({publishedArticles.length})</button>
             </div>
           </div>
-          <button onClick={() => supabase.auth.signOut()} className="px-8 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:text-red-500 transition-colors">Logoff</button>
+          <button onClick={() => supabase.auth.signOut()} className="px-8 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:text-red-500 transition-colors">Desconectar</button>
         </div>
 
         {activeMode === 'generate' && (
           <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
               <div className="lg:col-span-2 p-10 rounded-[3rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-2xl">
-                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Pautas Estratégicas</label>
-                <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px] text-brand-soft leading-relaxed" placeholder="Ex: SEO para E-commerce, IA em 2025, Marketing de Influência..." />
+                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Pautas para Processamento</label>
+                <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px] text-brand-soft" placeholder="Digite as pautas estratégicas..." />
                 <button onClick={generateDailyPosts} disabled={isGenerating} className="w-full mt-6 py-6 rounded-2xl font-black text-xs uppercase bg-brand-cyan text-brand-obsidian shadow-xl shadow-brand-cyan/20 hover:bg-brand-purple hover:text-white transition-all disabled:opacity-50">
-                  {isGenerating ? 'Executando Protocolo...' : 'Gerar Novos Insights'}
+                  {isGenerating ? 'Curadoria em Curso...' : 'Gerar Novos Rascunhos'}
                 </button>
               </div>
-              <div className="p-8 rounded-[3rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 overflow-y-auto max-h-[300px] shadow-inner">
-                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 uppercase text-[9px]">Terminal Editorial</div>
-                {logs.length === 0 ? <div className="text-brand-muted italic">Aguardando comando...</div> : logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
+              <div className="p-8 rounded-[3rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 overflow-y-auto max-h-[300px]">
+                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 uppercase text-[9px]">Log de Sincronia</div>
+                {logs.length === 0 ? <div className="text-brand-muted italic">Aguardando pautas...</div> : logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
               </div>
             </div>
             
             <div className="space-y-8">
               <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6 flex justify-between items-center">
-                Rascunhos Pendentes
-                <span className="bg-brand-graphite px-4 py-1 rounded-full text-[10px] font-mono text-brand-cyan">{drafts.length} itens</span>
+                Rascunhos na Nuvem
+                <span className="bg-brand-graphite px-4 py-1 rounded-full text-[10px] font-mono text-brand-cyan">{drafts.length}</span>
               </h2>
-              
               {drafts.length === 0 && !isGenerating && (
                 <div className="py-24 text-center border-2 border-dashed border-brand-graphite/30 rounded-[4rem]">
-                   <p className="text-brand-muted uppercase font-black text-[10px] tracking-widest">Nenhum rascunho em cache</p>
+                   <p className="text-brand-muted uppercase font-black text-[10px] tracking-widest">Nenhum rascunho detectado</p>
                 </div>
               )}
-              
               {drafts.map(draft => (
-                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 items-center group hover:border-brand-cyan transition-all animate-in zoom-in duration-300">
+                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 items-center group hover:border-brand-cyan transition-all">
                   <img src={draft.image} className="w-40 h-28 rounded-2xl object-cover bg-brand-obsidian shadow-lg" />
                   <div className="flex-grow">
                     <h3 className="text-xl font-black text-white mb-2 leading-tight">{draft.title}</h3>
-                    <p className="text-[10px] text-brand-muted uppercase font-bold tracking-widest">{draft.category} • {draft.date}</p>
+                    <p className="text-[10px] text-brand-muted uppercase font-bold">{draft.category} • {draft.date}</p>
                   </div>
                   <div className="flex gap-4">
                     <button onClick={() => setEditingArticle(draft)} className="text-[9px] font-black bg-white text-brand-obsidian px-6 py-3 rounded-xl hover:bg-brand-cyan transition-all">Revisar</button>
@@ -242,18 +250,14 @@ const AdminDashboard: React.FC = () => {
 
         {activeMode === 'manage' && (
           <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Insights em Produção</h2>
+            <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Insights Live</h2>
             <div className="grid grid-cols-1 gap-6">
-              {publishedArticles.length === 0 ? (
-                <div className="py-24 text-center border-2 border-dashed border-brand-graphite/30 rounded-[4rem]">
-                   <p className="text-brand-muted uppercase font-black text-[10px] tracking-widest">Aguardando primeira publicação</p>
-                </div>
-              ) : publishedArticles.map(article => (
+              {publishedArticles.map(article => (
                 <div key={article.id} className="p-8 rounded-[3rem] bg-brand-cyan/5 border border-brand-cyan/10 flex flex-col md:flex-row gap-8 items-center group hover:bg-brand-cyan/10 transition-all">
                   <img src={article.image} className="w-32 h-24 rounded-2xl object-cover bg-brand-obsidian shadow-xl" />
                   <div className="flex-grow">
                     <h3 className="text-lg font-black text-white mb-1 leading-tight">{article.title}</h3>
-                    <p className="text-[9px] text-brand-muted uppercase tracking-[0.2em] font-mono">{article.date} • {article.slug}</p>
+                    <p className="text-[9px] text-brand-muted uppercase tracking-widest font-mono">{article.date}</p>
                   </div>
                   <div className="flex gap-4">
                     <button onClick={() => setEditingArticle(article)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl hover:bg-brand-purple hover:text-white transition-all">Editar</button>
@@ -269,45 +273,39 @@ const AdminDashboard: React.FC = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 overflow-y-auto backdrop-blur-sm">
             <div className="bg-brand-graphite w-full max-w-5xl p-10 md:p-14 rounded-[3.5rem] border border-brand-graphite shadow-2xl space-y-8 my-8 relative animate-in fade-in zoom-in duration-300">
               <div className="flex justify-between items-center border-b border-brand-graphite pb-6">
-                <h2 className="text-3xl font-black uppercase text-brand-cyan tracking-tighter">Editor de Conteúdo</h2>
+                <h2 className="text-3xl font-black uppercase text-brand-cyan tracking-tighter">Editor Protocolo</h2>
                 <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white text-3xl">×</button>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <div className="space-y-6">
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted ml-1">Título do Protocolo</label>
-                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft font-bold shadow-inner" />
-                  
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted ml-1">Sumário (Excerpt)</label>
-                  <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm text-brand-soft leading-relaxed shadow-inner" />
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted">Título</label>
+                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft font-bold" />
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted">Resumo</label>
+                  <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm text-brand-soft leading-relaxed" />
                 </div>
                 <div className="space-y-6">
                   <div className="rounded-[2.5rem] overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-2xl">
-                    <img src={editingArticle.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <img src={editingArticle.image} className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-brand-obsidian/80 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-2 rounded-xl font-black text-[10px] uppercase shadow-xl hover:bg-brand-cyan transition-all">Substituir Arte</button>
                     </div>
                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                     {isUploading && <div className="absolute inset-0 bg-brand-obsidian/60 backdrop-blur-sm flex items-center justify-center"><div className="w-8 h-8 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>}
                   </div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted ml-1">Categoria de Dados</label>
-                  <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft font-bold shadow-inner" />
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted">Categoria</label>
+                  <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft font-bold" />
                 </div>
               </div>
-
-              <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted ml-1">Corpo do Post (Protocolo HTML)</label>
+              <label className="block text-[10px] font-black uppercase tracking-widest text-brand-muted">Corpo do Protocolo (HTML)</label>
               <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed text-brand-soft shadow-inner" />
-
               <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-brand-graphite">
                 <button onClick={async () => {
-                   addLog("Persistindo rascunho em cache...");
+                   addLog("Sincronizando rascunho...");
                    const ok = await saveToCloud(editingArticle);
-                   if (ok) { addLog("Protocolo salvo com sucesso."); setEditingArticle(null); loadAllContent(); }
-                   else addLog("Erro crítico na persistência.");
-                }} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest hover:border-white transition-all">Salvar Offline</button>
-                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-brand-cyan/30 hover:bg-brand-purple hover:text-white transition-all transform active:scale-95">
-                   Lançar no Ecossistema
-                </button>
+                   if (ok) { addLog("Protocolo salvo."); setEditingArticle(null); loadAllContent(); }
+                   else addLog("Falha na sincronia.");
+                }} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest hover:border-white transition-all">Apenas Salvar</button>
+                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-brand-cyan/30 hover:bg-brand-purple hover:text-white transition-all">Lançar Insight</button>
               </div>
             </div>
           </div>

@@ -4,16 +4,11 @@ import { createClient } from '@supabase/supabase-js';
 import { Buffer } from 'buffer';
 
 export default async function handler(req: any, res: any) {
-  // Evitar múltiplos disparos de headers
-  if (res.headersSent) return;
-  res.setHeader('Content-Type', 'application/json');
-
   if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'Método não permitido' });
+    return res.status(405).json({ success: false, error: 'Método não autorizado.' });
   }
 
   const { themes } = req.body;
-  
   const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
   const BUCKET_NAME = 'blog-images';
@@ -34,15 +29,12 @@ export default async function handler(req: any, res: any) {
         const { data: { publicUrl } } = supabaseAdmin.storage.from(BUCKET_NAME).getPublicUrl(`ai/${fileName}`);
         return publicUrl;
       } catch (e) {
-        console.error("Erro no Storage:", e);
         return null;
       }
     };
 
-    // Protocolo de Extração Robusta de JSON
     const extractJson = (text: string) => {
       try {
-        // Tenta encontrar o primeiro { e o último }
         const start = text.indexOf('{');
         const end = text.lastIndexOf('}');
         if (start === -1 || end === -1) return null;
@@ -89,12 +81,11 @@ export default async function handler(req: any, res: any) {
     });
 
     const aiText = curatorResponse.text;
-    if (!aiText) throw new Error("A IA não retornou nenhum texto.");
+    if (!aiText) throw new Error("IA offline.");
 
     const parsedData = extractJson(aiText);
-    if (!parsedData || !parsedData.articles || parsedData.articles.length === 0) {
-      console.error("Falha ao parsear JSON da IA ou lista vazia:", aiText);
-      throw new Error("Resposta da IA em formato inválido ou lista de artigos vazia.");
+    if (!parsedData || !parsedData.articles) {
+      throw new Error("Protocolo de IA corrompido.");
     }
 
     const rawArticles = parsedData.articles;
@@ -104,7 +95,7 @@ export default async function handler(req: any, res: any) {
       try {
         const imageRes = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
-          contents: { parts: [{ text: art.promptImagem + " professional, high resolution, editorial photography style" }] },
+          contents: { parts: [{ text: art.promptImagem + " professional editorial photography style" }] },
           config: { imageConfig: { aspectRatio: "16:9" } }
         });
 
@@ -117,9 +108,7 @@ export default async function handler(req: any, res: any) {
             }
           }
         }
-      } catch (e) { 
-        console.warn("Falha ao gerar imagem AI, usando fallback do Unsplash.");
-      }
+      } catch (e) { /* fallback active */ }
 
       return {
         id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
@@ -139,18 +128,13 @@ export default async function handler(req: any, res: any) {
       };
     }));
 
-    // Inserção em Lote no Supabase
     const { data: insertedData, error: dbError } = await supabaseAdmin
       .from('posts')
       .insert(articlesToInsert)
       .select();
 
-    if (dbError) {
-      console.error("ERRO SUPABASE INSERT:", dbError.message);
-      throw new Error(`Erro ao salvar rascunhos no banco: ${dbError.message}`);
-    }
+    if (dbError) throw new Error(`Banco offline: ${dbError.message}`);
 
-    // Retorno explícito dos rascunhos criados
     return res.status(200).json({ 
       success: true, 
       count: insertedData?.length || 0, 
@@ -158,7 +142,7 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("ERRO CRÍTICO CURADORIA:", error.message);
+    console.error("CURADORIA_ERROR:", error.message);
     if (!res.headersSent) {
       return res.status(500).json({ success: false, error: error.message });
     }

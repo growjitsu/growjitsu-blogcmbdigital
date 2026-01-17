@@ -12,9 +12,6 @@ const mapToFrontend = (p: any) => ({
 });
 
 export default async function handler(req: any, res: any) {
-  if (res.headersSent) return;
-  res.setHeader('Content-Type', 'application/json');
-
   try {
     if (req.method === 'GET') {
       const { slug, status } = req.query;
@@ -25,7 +22,10 @@ export default async function handler(req: any, res: any) {
           .select('*')
           .eq('slug', slug)
           .single();
-        if (error) return res.status(404).json({ success: false, error: 'Post não encontrado' });
+        
+        if (error) {
+          return res.status(404).json({ success: false, error: 'Post não localizado no ecossistema.' });
+        }
         return res.status(200).json({ success: true, article: mapToFrontend(data) });
       }
 
@@ -33,14 +33,16 @@ export default async function handler(req: any, res: any) {
       if (status) query = query.eq('status', status);
       
       const { data, error } = await query.order('created_at', { ascending: false });
+      
       if (error) throw error;
+      
       return res.status(200).json({ success: true, articles: (data || []).map(mapToFrontend) });
     }
 
     if (req.method === 'POST') {
       const article = req.body;
       if (!article.id || !article.slug) {
-        return res.status(400).json({ success: false, error: 'Dados insuficientes para sincronização' });
+        return res.status(400).json({ success: false, error: 'Assinatura de dados incompleta.' });
       }
 
       const { error } = await supabase
@@ -68,13 +70,15 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === 'DELETE') {
       const { id } = req.query;
-      if (!id) return res.status(400).json({ success: false, error: 'ID ausente' });
+      if (!id) {
+        return res.status(400).json({ success: false, error: 'ID de protocolo ausente.' });
+      }
       const { error } = await supabase.from('posts').delete().eq('id', id);
       if (error) throw error;
       return res.status(200).json({ success: true, message: 'Protocolo removido da nuvem.' });
     }
 
-    return res.status(405).json({ success: false, error: 'Método não permitido' });
+    return res.status(405).json({ success: false, error: 'Método não autorizado pelo terminal.' });
 
   } catch (error: any) {
     console.error("POSTS_API_ERROR:", error.message);
