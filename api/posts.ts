@@ -7,12 +7,15 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const TABLE_NAME = 'posts';
 
-const mapToFrontend = (p: any) => ({
-  ...p,
-  image: p.image_url || p.image || '',
-  metaTitle: p.meta_title || p.metaTitle || '',
-  metaDescription: p.meta_description || p.metaDescription || ''
-});
+const mapToFrontend = (p: any) => {
+  if (!p) return null;
+  return {
+    ...p,
+    image: p.image_url || p.image || '',
+    metaTitle: p.meta_title || p.metaTitle || '',
+    metaDescription: p.meta_description || p.metaDescription || ''
+  };
+};
 
 export default async function handler(req: any, res: any) {
   try {
@@ -47,12 +50,13 @@ export default async function handler(req: any, res: any) {
         });
       }
       
-      return res.status(200).json({ success: true, articles: (data || []).map(mapToFrontend) });
+      const articles = (data || []).map(mapToFrontend).filter(Boolean);
+      return res.status(200).json({ success: true, articles });
     }
 
     if (req.method === 'POST') {
       const article = req.body;
-      if (!article.slug) {
+      if (!article || !article.slug) {
         return res.status(400).json({ success: false, error: 'Dados incompletos (slug obrigatório).' });
       }
 
@@ -72,25 +76,22 @@ export default async function handler(req: any, res: any) {
         updated_at: new Date().toISOString()
       };
 
-      // Só incluímos o ID se ele for um UUID válido (36 caracteres)
       if (article.id && article.id.length === 36) {
         payload.id = article.id;
       }
 
       const { error } = await supabase
         .from(TABLE_NAME)
-        .upsert(payload, { onConflict: 'slug' }); // Usar slug como conflito é mais seguro para sincronização
+        .upsert(payload, { onConflict: 'slug' });
 
-      if (error) {
-        console.error("UPSERT_ERROR:", error.message);
-        throw error;
-      }
+      if (error) throw error;
       
       return res.status(200).json({ success: true, message: 'Operação realizada com sucesso.' });
     }
 
     if (req.method === 'DELETE') {
       const { id } = req.query;
+      if (!id) return res.status(400).json({ success: false, error: 'ID necessário' });
       const { error } = await supabase.from(TABLE_NAME).delete().eq('id', id);
       if (error) throw error;
       return res.status(200).json({ success: true, message: 'Removido.' });
@@ -99,6 +100,9 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ success: false, error: 'Método não permitido.' });
 
   } catch (error: any) {
-    return res.status(500).json({ success: false, error: error.message });
+    console.error("API_POSTS_CRITICAL:", error.message);
+    if (!res.writableEnded) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
   }
 }

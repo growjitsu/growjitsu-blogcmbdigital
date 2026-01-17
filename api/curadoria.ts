@@ -97,7 +97,6 @@ export default async function handler(req: any, res: any) {
       } catch (e) { /* fallback image used */ }
 
       return {
-        // Omitimos o ID para que o Supabase use o DEFAULT gen_random_uuid()
         slug: art.slug,
         title: art.title,
         excerpt: art.excerpt,

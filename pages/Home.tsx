@@ -27,8 +27,15 @@ const Home: React.FC = () => {
     setDbError(null);
     try {
       const response = await fetch('/api/posts?status=published');
+      const text = await response.text();
       
-      const data = await response.json();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        console.error("Erro ao processar JSON da API:", text);
+        throw new Error("A resposta do servidor foi malformada. Verifique os logs do console.");
+      }
       
       if (!response.ok) {
         throw new Error(data.error || `Erro de Conexão (Status ${response.status})`);
@@ -94,7 +101,9 @@ const Home: React.FC = () => {
         body: JSON.stringify({ email })
       });
       
-      const data = await response.json();
+      const text = await response.text();
+      const data = JSON.parse(text);
+
       if (data.success) {
         setMessage({ type: 'success', text: data.message });
         setEmail('');
@@ -132,7 +141,7 @@ const Home: React.FC = () => {
         <div className="container mx-auto px-4 py-32 text-center max-w-2xl">
           <div className="p-12 rounded-[3rem] bg-red-500/5 border border-red-500/20 shadow-2xl">
             <h3 className="text-2xl font-black text-red-400 uppercase tracking-tighter mb-4">Falha Crítica de Conexão</h3>
-            <p className="text-brand-muted mb-8 leading-relaxed">Não foi possível estabelecer sincronia com a base de dados CMBDIGITAL. Isso geralmente ocorre quando a estrutura de tabelas ainda não foi inicializada.</p>
+            <p className="text-brand-muted mb-8 leading-relaxed">Não foi possível estabelecer sincronia com a base de dados CMBDIGITAL. Isso geralmente ocorre quando a estrutura de tabelas ainda não foi inicializada ou houve um erro no stream de dados.</p>
             <Link to="/curadoria-oculta" className="inline-block bg-brand-cyan text-brand-obsidian px-10 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-brand-cyan/20">Acessar Terminal de Reparo</Link>
           </div>
         </div>

@@ -51,8 +51,12 @@ const AdminDashboard: React.FC = () => {
   const [publishedArticles, setPublishedArticles] = useState<Article[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [schemaError, setSchemaError] = useState(false);
+  
+  // Estados para edição de imagem
+  const [newImageFile, setNewImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -127,24 +131,86 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setNewImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handlePublish = async (id: string) => {
-    const post = editingArticle || pendingArticles.find(d => d.id === id);
+    let post = editingArticle || pendingArticles.find(d => d.id === id);
     if (!post) return;
-    addLog(`Publicando Insight: ${post.title}...`);
+
+    setIsUploading(true);
+    addLog(`Iniciando sincronização de: ${post.title}...`);
+
     try {
+      let finalImageUrl = post.image || post.image_url;
+
+      // Se houver uma nova imagem selecionada, faz o upload primeiro
+      if (newImageFile) {
+        addLog("Fazendo upload da nova mídia...");
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          body: newImageFile,
+          headers: {
+            'x-file-name': `${post.slug}-${Date.now()}.${newImageFile.name.split('.').pop()}`,
+            'content-type': newImageFile.type
+          }
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadData.success) {
+          finalImageUrl = uploadData.image_url;
+          addLog("Mídia atualizada com sucesso.");
+        } else {
+          throw new Error(uploadData.error || "Erro no upload da imagem.");
+        }
+      }
+
+      // Prepara o payload para o banco
+      const payload = { 
+        ...post, 
+        image_url: finalImageUrl,
+        image: finalImageUrl, // Sincroniza ambos para evitar inconsistência no frontend
+        status: 'published', 
+        date: post.status === 'published' ? post.date : new Date().toLocaleDateString('pt-BR') 
+      };
+
       const res = await fetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...post, status: 'published', date: new Date().toLocaleDateString('pt-BR') })
+        body: JSON.stringify(payload)
       });
+      
       const data = await res.json();
       if (data.success) {
-        addLog("Protocolo Ativado com sucesso.");
+        addLog("Protocolo Ativado e sincronizado.");
         setEditingArticle(null);
+        setNewImageFile(null);
+        setImagePreview(null);
         loadAllContent();
         setActiveMode('manage');
+      } else {
+        throw new Error(data.error);
       }
-    } catch (e) { addLog("Falha na publicação."); }
+    } catch (e: any) { 
+      addLog(`Falha técnica: ${e.message}`);
+      alert(`Erro ao salvar: ${e.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const startEditing = (article: Article) => {
+    setEditingArticle(article);
+    setImagePreview(null);
+    setNewImageFile(null);
   };
 
   if (isAuthenticated === null) return <div className="min-h-screen bg-brand-obsidian flex items-center justify-center"><div className="w-10 h-10 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>;
@@ -242,7 +308,7 @@ const AdminDashboard: React.FC = () => {
                     <p className="text-[10px] text-brand-muted uppercase font-bold tracking-widest">{article.category} • PENDENTE</p>
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={() => setEditingArticle(article)} className="text-[9px] font-black bg-white text-brand-obsidian px-6 py-3.5 rounded-xl hover:bg-brand-cyan transition-all">Revisar</button>
+                    <button onClick={() => startEditing(article)} className="text-[9px] font-black bg-white text-brand-obsidian px-6 py-3.5 rounded-xl hover:bg-brand-cyan transition-all">Revisar</button>
                     <button onClick={() => handlePublish(article.id)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3.5 rounded-xl hover:bg-brand-purple hover:text-white transition-all">Aprovar</button>
                   </div>
                 </div>
@@ -262,7 +328,7 @@ const AdminDashboard: React.FC = () => {
                       <h3 className="text-md font-bold text-white">{article.title}</h3>
                       <p className="text-[9px] text-brand-muted uppercase tracking-widest font-mono">{article.date} • {article.category}</p>
                     </div>
-                    <button onClick={() => setEditingArticle(article)} className="text-[9px] font-black border border-brand-graphite px-6 py-3 rounded-xl hover:border-brand-cyan hover:text-brand-cyan transition-all">Editar</button>
+                    <button onClick={() => startEditing(article)} className="text-[9px] font-black border border-brand-graphite px-6 py-3 rounded-xl hover:border-brand-cyan hover:text-brand-cyan transition-all">Editar</button>
                   </div>
                ))}
              </div>
@@ -277,17 +343,71 @@ const AdminDashboard: React.FC = () => {
                 <span className="text-[10px] font-black uppercase tracking-[0.5em] text-brand-cyan">Refinamento de Protocolo</span>
                 <h2 className="text-3xl font-black uppercase text-white tracking-tighter">Editor Editorial</h2>
               </div>
-              <div className="grid grid-cols-1 gap-8">
-                <div className="space-y-6">
-                  <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Título do Insight</label>
-                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-8 py-5 text-white font-bold outline-none focus:border-brand-cyan" />
+              
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+                <div className="lg:col-span-2 space-y-8">
+                  <div className="space-y-4">
+                    <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Título do Insight</label>
+                    <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-8 py-5 text-white font-bold outline-none focus:border-brand-cyan transition-all" />
+                  </div>
                   
-                  <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Conteúdo Estruturado (HTML)</label>
-                  <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 text-sm h-96 font-mono leading-relaxed outline-none focus:border-brand-cyan text-brand-soft shadow-inner" />
+                  <div className="space-y-4">
+                    <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Conteúdo Estruturado (HTML)</label>
+                    <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 text-sm h-96 font-mono leading-relaxed outline-none focus:border-brand-cyan text-brand-soft shadow-inner transition-all" />
+                  </div>
+                </div>
+
+                <div className="space-y-8">
+                   <div className="space-y-6">
+                      <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Capa do Insight</label>
+                      <div className="relative group aspect-video rounded-3xl overflow-hidden border border-brand-graphite bg-brand-obsidian flex items-center justify-center">
+                        <img 
+                          src={imagePreview || editingArticle.image || editingArticle.image_url} 
+                          alt="Capa" 
+                          className={`w-full h-full object-cover transition-opacity duration-500 ${isUploading ? 'opacity-30' : 'opacity-100'}`} 
+                        />
+                        {isUploading && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-8 h-8 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                           <button onClick={() => fileInputRef.current?.click()} className="bg-brand-cyan text-brand-obsidian p-3 rounded-xl hover:scale-110 transition-transform">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                           </button>
+                           {(imagePreview || editingArticle.image || editingArticle.image_url) && (
+                             <button onClick={() => { setEditingArticle({...editingArticle, image: '', image_url: ''}); setImagePreview(null); setNewImageFile(null); }} className="bg-red-500 text-white p-3 rounded-xl hover:scale-110 transition-transform">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                             </button>
+                           )}
+                        </div>
+                      </div>
+                      <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
+                      <p className="text-[9px] text-brand-muted italic leading-relaxed">
+                        Dica: Se você não selecionar uma nova imagem, a atual será mantida. Imagens devem ser preferencialmente 16:9.
+                      </p>
+                   </div>
+
+                   <div className="space-y-4">
+                     <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Categoria</label>
+                     <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 text-xs font-bold text-white outline-none focus:border-brand-cyan" />
+                   </div>
+
+                   <div className="space-y-4">
+                     <label className="block text-[9px] font-black uppercase tracking-widest text-brand-muted">Resumo (Excerpt)</label>
+                     <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 text-xs h-32 outline-none focus:border-brand-cyan" />
+                   </div>
                 </div>
               </div>
-              <div className="flex flex-col sm:flex-row gap-4 pt-4">
-                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-7 rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl shadow-brand-cyan/20 hover:bg-brand-purple hover:text-white transition-all">Finalizar e Publicar Insight</button>
+
+              <div className="flex flex-col sm:flex-row gap-4 pt-4 border-t border-brand-graphite">
+                <button 
+                  onClick={() => handlePublish(editingArticle.id)} 
+                  disabled={isUploading}
+                  className="flex-grow bg-brand-cyan text-brand-obsidian py-7 rounded-3xl font-black uppercase text-xs tracking-widest shadow-2xl shadow-brand-cyan/20 hover:bg-brand-purple hover:text-white transition-all disabled:opacity-50"
+                >
+                  {isUploading ? 'Sincronizando Dados...' : 'Finalizar e Sincronizar Insight'}
+                </button>
                 <button onClick={() => setEditingArticle(null)} className="sm:w-1/4 border border-brand-graphite text-brand-muted py-7 rounded-3xl font-black uppercase text-xs tracking-widest hover:text-white transition-all">Descartar Alterações</button>
               </div>
             </div>
