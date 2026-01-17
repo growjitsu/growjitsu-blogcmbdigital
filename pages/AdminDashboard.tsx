@@ -44,7 +44,7 @@ const AdminDashboard: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [activeMode, setActiveMode] = useState<'generate' | 'manage' | 'setup'>('generate');
+  const [activeMode, setActiveMode] = useState<'generate' | 'manage' | 'setup' | 'manual'>('generate');
   const [isGenerating, setIsGenerating] = useState(false);
   const [themes, setThemes] = useState('');
   const [pendingArticles, setPendingArticles] = useState<Article[]>([]);
@@ -53,11 +53,20 @@ const AdminDashboard: React.FC = () => {
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [schemaError, setSchemaError] = useState(false);
   
-  // Estados para edição de imagem
+  // Estados para edição/upload de imagem
   const [newImageFile, setNewImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados para Post Manual
+  const [manualPost, setManualPost] = useState({
+    title: '',
+    category: 'Tecnologia',
+    excerpt: '',
+    content: '',
+    status: 'published' as 'published' | 'pending'
+  });
 
   useEffect(() => {
     const checkSession = async () => {
@@ -65,7 +74,20 @@ const AdminDashboard: React.FC = () => {
       setIsAuthenticated(!!session);
     };
     checkSession();
+    
+    // Listener para mudanças de auth (corrige o botão de encerrar operação)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsAuthenticated(!!session);
+      if (event === 'SIGNED_OUT') {
+        addLog("Sessão encerrada com segurança.");
+      }
+    });
+
     loadAllContent();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const loadAllContent = async () => {
@@ -98,7 +120,6 @@ const AdminDashboard: React.FC = () => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (error) throw error;
-      setIsAuthenticated(true);
       loadAllContent();
     } catch (error: any) { 
       alert(`Erro: ${error.message}`); 
@@ -143,6 +164,84 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const generateSlug = (text: string) => {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/[\s_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  };
+
+  const handleSaveManualPost = async () => {
+    if (!manualPost.title || !manualPost.content) {
+      alert("Título e Conteúdo são obrigatórios.");
+      return;
+    }
+
+    setIsUploading(true);
+    addLog("Iniciando criação de post manual...");
+    
+    try {
+      let imageUrl = '';
+      const slug = generateSlug(manualPost.title);
+
+      if (newImageFile) {
+        addLog("Fazendo upload da imagem...");
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          body: newImageFile,
+          headers: {
+            'x-file-name': `${slug}-${Date.now()}.${newImageFile.name.split('.').pop()}`,
+            'content-type': newImageFile.type
+          }
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadData.success) {
+          imageUrl = uploadData.image_url;
+        } else throw new Error(uploadData.error);
+      } else {
+        imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(manualPost.category)}`;
+      }
+
+      const payload = {
+        title: manualPost.title,
+        slug: slug,
+        content: manualPost.content,
+        excerpt: manualPost.excerpt || manualPost.title,
+        category: manualPost.category,
+        status: manualPost.status,
+        image_url: imageUrl,
+        image: imageUrl,
+        author: 'CMBDIGITAL',
+        date: new Date().toLocaleDateString('pt-BR'),
+        tags: [manualPost.category.toLowerCase()]
+      };
+
+      const res = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        addLog("Post manual criado com sucesso.");
+        setManualPost({ title: '', category: 'Tecnologia', excerpt: '', content: '', status: 'published' });
+        setNewImageFile(null);
+        setImagePreview(null);
+        loadAllContent();
+        setActiveMode('manage');
+      } else throw new Error(data.error);
+
+    } catch (e: any) {
+      addLog(`Erro: ${e.message}`);
+      alert(`Falha ao criar post: ${e.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handlePublish = async (id: string) => {
     let post = editingArticle || pendingArticles.find(d => d.id === id);
     if (!post) return;
@@ -153,7 +252,6 @@ const AdminDashboard: React.FC = () => {
     try {
       let finalImageUrl = post.image || post.image_url;
 
-      // Se houver uma nova imagem selecionada, faz o upload primeiro
       if (newImageFile) {
         addLog("Fazendo upload da nova mídia...");
         const uploadRes = await fetch('/api/upload', {
@@ -173,11 +271,10 @@ const AdminDashboard: React.FC = () => {
         }
       }
 
-      // Prepara o payload para o banco
       const payload = { 
         ...post, 
         image_url: finalImageUrl,
-        image: finalImageUrl, // Sincroniza ambos para evitar inconsistência no frontend
+        image: finalImageUrl,
         status: 'published', 
         date: post.status === 'published' ? post.date : new Date().toLocaleDateString('pt-BR') 
       };
@@ -238,6 +335,7 @@ const AdminDashboard: React.FC = () => {
             <h1 className="text-5xl font-black tracking-tighter uppercase text-white">Centro de <span className="text-brand-cyan">Operações</span></h1>
             <div className="flex flex-wrap gap-3 mt-6">
               <button onClick={() => setActiveMode('generate')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'generate' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Curadoria IA</button>
+              <button onClick={() => setActiveMode('manual')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'manual' ? 'bg-brand-purple text-white' : 'bg-brand-graphite text-brand-muted'}`}>Post Manual</button>
               <button onClick={() => setActiveMode('manage')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'manage' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Insights Ativos ({publishedArticles.length})</button>
               <button onClick={() => setActiveMode('setup')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all relative ${activeMode === 'setup' ? 'bg-brand-amber text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>
                 Reparar Banco
@@ -247,6 +345,69 @@ const AdminDashboard: React.FC = () => {
           </div>
           <button onClick={() => supabase.auth.signOut()} className="px-8 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:bg-red-500/10 hover:text-red-500 transition-all">Encerrar Operação</button>
         </div>
+
+        {activeMode === 'manual' && (
+          <div className="animate-in fade-in duration-500 space-y-10">
+            <div className="p-10 rounded-[3rem] bg-brand-graphite/40 border border-brand-graphite/50 backdrop-blur-sm space-y-8">
+              <h2 className="text-2xl font-black uppercase tracking-tighter text-white">Criar Postagem Manual</h2>
+              
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted">Título</label>
+                    <input type="text" value={manualPost.title} onChange={e => setManualPost({...manualPost, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 text-white font-bold outline-none focus:border-brand-cyan" placeholder="Ex: Guia Completo de Marketing 2025" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted">Conteúdo (HTML)</label>
+                    <textarea value={manualPost.content} onChange={e => setManualPost({...manualPost, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 text-sm h-96 font-mono outline-none focus:border-brand-cyan" placeholder="<h2>Subtítulo</h2><p>Texto...</p>" />
+                  </div>
+                </div>
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted">Capa</label>
+                    <div className="aspect-video rounded-3xl bg-brand-obsidian border border-brand-graphite flex flex-col items-center justify-center overflow-hidden relative group">
+                      {imagePreview ? (
+                        <img src={imagePreview} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-brand-muted text-[10px] uppercase font-bold tracking-widest text-center px-4">Nenhuma imagem selecionada</span>
+                      )}
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button onClick={() => fileInputRef.current?.click()} className="bg-brand-cyan text-brand-obsidian px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest">Escolher Arquivo</button>
+                      </div>
+                    </div>
+                    <input type="file" ref={fileInputRef} onChange={handleImageChange} className="hidden" accept="image/*" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted">Categoria</label>
+                    <select value={manualPost.category} onChange={e => setManualPost({...manualPost, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 text-white text-xs font-bold outline-none focus:border-brand-cyan">
+                      <option>Tecnologia</option>
+                      <option>Inteligência Artificial</option>
+                      <option>Marketing Digital</option>
+                      <option>Produtividade</option>
+                      <option>Renda Online</option>
+                      <option>Ferramentas</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted">Resumo (Excerpt)</label>
+                    <textarea value={manualPost.excerpt} onChange={e => setManualPost({...manualPost, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-4 text-xs h-32 outline-none focus:border-brand-cyan" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted">Status de Publicação</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button onClick={() => setManualPost({...manualPost, status: 'published'})} className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${manualPost.status === 'published' ? 'bg-brand-cyan border-brand-cyan text-brand-obsidian' : 'bg-transparent border-brand-graphite text-brand-muted'}`}>Publicado</button>
+                      <button onClick={() => setManualPost({...manualPost, status: 'pending'})} className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${manualPost.status === 'pending' ? 'bg-brand-amber border-brand-amber text-brand-obsidian' : 'bg-transparent border-brand-graphite text-brand-muted'}`}>Rascunho</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <button onClick={handleSaveManualPost} disabled={isUploading} className="w-full py-6 rounded-2xl bg-brand-cyan text-brand-obsidian font-black uppercase tracking-widest text-xs shadow-xl shadow-brand-cyan/20 hover:scale-[1.01] transition-all disabled:opacity-50">
+                {isUploading ? 'Processando Protocolo...' : 'Efetivar Postagem Manual'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {activeMode === 'setup' && (
           <div className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-10">
@@ -375,11 +536,6 @@ const AdminDashboard: React.FC = () => {
                            <button onClick={() => fileInputRef.current?.click()} className="bg-brand-cyan text-brand-obsidian p-3 rounded-xl hover:scale-110 transition-transform">
                               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                            </button>
-                           {(imagePreview || editingArticle.image || editingArticle.image_url) && (
-                             <button onClick={() => { setEditingArticle({...editingArticle, image: '', image_url: ''}); setImagePreview(null); setNewImageFile(null); }} className="bg-red-500 text-white p-3 rounded-xl hover:scale-110 transition-transform">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                             </button>
-                           )}
                         </div>
                       </div>
                       <input type="file" ref={fileInputRef} onChange={handleImageChange} accept="image/*" className="hidden" />
