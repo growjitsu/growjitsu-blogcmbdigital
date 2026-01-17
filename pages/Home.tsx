@@ -11,6 +11,7 @@ const Home: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [dbError, setDbError] = useState<string | null>(null);
   
   // Newsletter Logic
   const [email, setEmail] = useState('');
@@ -23,28 +24,24 @@ const Home: React.FC = () => {
 
   const fetchArticles = async () => {
     setIsLoading(true);
+    setDbError(null);
     try {
       const response = await fetch('/api/posts?status=published');
       
-      if (!response.ok) {
-        throw new Error(`Falha na conexão: Status ${response.status}`);
-      }
-
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        console.error("Resposta não-JSON recebida:", text);
-        throw new Error("O servidor retornou um formato de dados inválido.");
-      }
-
       const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || `Erro de Conexão (Status ${response.status})`);
+      }
+
       if (data.success) {
         setAllArticles(data.articles || []);
       } else {
-        throw new Error(data.error || "Erro desconhecido ao carregar artigos.");
+        throw new Error(data.error || "Falha técnica ao carregar insights.");
       }
     } catch (err: any) {
-      console.error("Falha ao carregar artigos do banco:", err.message);
+      console.error("Home Articles Fetch Error:", err.message);
+      setDbError(err.message);
     } finally {
       setIsLoading(false);
     }
@@ -85,7 +82,7 @@ const Home: React.FC = () => {
   const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !email.includes('@')) {
-      setMessage({ type: 'error', text: 'Protocolo inválido: Insira um e-mail correto.' });
+      setMessage({ type: 'error', text: 'E-mail inválido.' });
       return;
     }
     setIsSubmitting(true);
@@ -115,8 +112,10 @@ const Home: React.FC = () => {
         <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-brand-cyan/5 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
         <div className="container mx-auto px-4 md:px-6 relative z-10 text-center">
           <div className="inline-flex items-center space-x-3 px-5 py-2 rounded-full mb-10 shadow-xl dark:bg-brand-graphite dark:border-brand-graphite bg-slate-50 border border-slate-200">
-            <span className="flex h-2 w-2 rounded-full bg-brand-cyan animate-pulse"></span>
-            <span className="text-[10px] font-black uppercase tracking-[0.3em] dark:text-brand-soft text-slate-600">Sincronização Ativa na Nuvem</span>
+            <span className={`flex h-2 w-2 rounded-full ${dbError ? 'bg-red-500' : 'bg-brand-cyan animate-pulse'}`}></span>
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] dark:text-brand-soft text-slate-600">
+              {dbError ? 'Conexão em Falha' : 'Sincronização Ativa na Nuvem'}
+            </span>
           </div>
           <h1 className="text-6xl md:text-9xl font-black mb-12 tracking-tighter leading-[0.85] dark:text-brand-soft text-slate-900">
             O Hub da <br/> <span className="text-brand-cyan font-serif italic font-light lowercase">autoridade digital.</span>
@@ -129,6 +128,14 @@ const Home: React.FC = () => {
 
       {isLoading ? (
         <div className="flex justify-center py-40"><div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>
+      ) : dbError ? (
+        <div className="container mx-auto px-4 py-32 text-center max-w-2xl">
+          <div className="p-12 rounded-[3rem] bg-red-500/5 border border-red-500/20 shadow-2xl">
+            <h3 className="text-2xl font-black text-red-400 uppercase tracking-tighter mb-4">Falha Crítica de Conexão</h3>
+            <p className="text-brand-muted mb-8 leading-relaxed">Não foi possível estabelecer sincronia com a base de dados CMBDIGITAL. Isso geralmente ocorre quando a estrutura de tabelas ainda não foi inicializada.</p>
+            <Link to="/curadoria-oculta" className="inline-block bg-brand-cyan text-brand-obsidian px-10 py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-brand-cyan/20">Acessar Terminal de Reparo</Link>
+          </div>
+        </div>
       ) : featured && currentPage === 1 && !searchQuery && (
         <section className="container mx-auto px-4 md:px-6 -mt-32 relative z-20">
           <div className="max-w-6xl mx-auto">
@@ -156,35 +163,37 @@ const Home: React.FC = () => {
         </section>
       )}
 
-      <section id="protocolos" className="container mx-auto px-4 md:px-6 mt-40">
-        <div className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
-          <div className="max-w-xl w-full">
-            <h2 className="text-4xl font-black tracking-tighter uppercase mb-4 dark:text-brand-soft text-slate-900">Feed de <span className="text-brand-cyan">Protocolos.</span></h2>
-            <div className="relative group">
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Pesquisar insight..." className="w-full bg-brand-graphite/30 border border-brand-graphite/50 rounded-2xl px-14 py-5 text-sm font-medium focus:border-brand-cyan outline-none transition-all dark:text-brand-soft" />
-              <svg className="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-brand-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-            </div>
-          </div>
-        </div>
-
-        {currentArticles.length > 0 ? (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-14">
-              {currentArticles.map(article => <ArticleCard key={article.id} article={article} />)}
-            </div>
-            {totalPages > 1 && (
-              <div className="mt-24 flex justify-center items-center gap-3">
-                <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase border dark:border-brand-graphite disabled:opacity-20 transition-all">Anterior</button>
-                <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase bg-brand-cyan text-brand-obsidian disabled:opacity-20 transition-all">Próximo</button>
+      {!isLoading && !dbError && (
+        <section id="protocolos" className="container mx-auto px-4 md:px-6 mt-40">
+          <div className="flex flex-col md:flex-row items-center justify-between mb-16 gap-8">
+            <div className="max-w-xl w-full">
+              <h2 className="text-4xl font-black tracking-tighter uppercase mb-4 dark:text-brand-soft text-slate-900">Feed de <span className="text-brand-cyan">Protocolos.</span></h2>
+              <div className="relative group">
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Pesquisar insight..." className="w-full bg-brand-graphite/30 border border-brand-graphite/50 rounded-2xl px-14 py-5 text-sm font-medium focus:border-brand-cyan outline-none transition-all dark:text-brand-soft" />
+                <svg className="w-5 h-5 absolute left-5 top-1/2 -translate-y-1/2 text-brand-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               </div>
-            )}
-          </>
-        ) : !isLoading && (
-          <div className="py-40 text-center border-2 border-dashed border-brand-graphite/30 rounded-[4rem]">
-            <h3 className="text-2xl font-black text-brand-muted">Busca sem resultados na nuvem.</h3>
+            </div>
           </div>
-        )}
-      </section>
+
+          {currentArticles.length > 0 ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-14">
+                {currentArticles.map(article => <ArticleCard key={article.id} article={article} />)}
+              </div>
+              {totalPages > 1 && (
+                <div className="mt-24 flex justify-center items-center gap-3">
+                  <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase border dark:border-brand-graphite disabled:opacity-20 transition-all">Anterior</button>
+                  <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase bg-brand-cyan text-brand-obsidian disabled:opacity-20 transition-all">Próximo</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="py-40 text-center border-2 border-dashed border-brand-graphite/30 rounded-[4rem]">
+              <h3 className="text-2xl font-black text-brand-muted">Busca sem resultados na nuvem.</h3>
+            </div>
+          )}
+        </section>
+      )}
 
       <section id="newsletter" className="container mx-auto px-4 md:px-6 mt-40">
         <div className="max-w-6xl mx-auto rounded-[5rem] overflow-hidden relative group dark:bg-brand-graphite bg-white border dark:border-brand-graphite border-slate-200 shadow-2xl transition-all duration-500 hover:shadow-brand-cyan/5">
