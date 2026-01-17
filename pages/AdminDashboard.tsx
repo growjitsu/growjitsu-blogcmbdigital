@@ -36,46 +36,19 @@ const AdminDashboard: React.FC = () => {
 
   const loadAllContent = async () => {
     try {
-      // Carregar rascunhos da nuvem
       const resDrafts = await fetch('/api/posts?status=draft');
       const dataDrafts = await resDrafts.json();
       if (dataDrafts.success) setDrafts(dataDrafts.articles || []);
 
-      // Carregar publicados da nuvem
       const resPub = await fetch('/api/posts?status=published');
       const dataPub = await resPub.json();
       if (dataPub.success) setPublishedArticles(dataPub.articles || []);
     } catch (e) {
-      console.error("Sync Error:", e);
-      addLog("Erro ao sincronizar com banco de dados.");
+      addLog("Erro ao sincronizar dados com o banco.");
     }
   };
 
   const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
-
-  const migrateLegacyData = async () => {
-    if (!confirm("Isso irá migrar posts estáticos e locais para o Banco de Dados. Continuar?")) return;
-    addLog("Iniciando migração de legado...");
-    
-    const localDrafts = JSON.parse(localStorage.getItem('cmb_drafts') || '[]');
-    const localPublished = JSON.parse(localStorage.getItem('cmb_published') || '[]');
-    const legacy = [...STATIC_ARTICLES, ...localDrafts, ...localPublished];
-    
-    let count = 0;
-    for (const post of legacy) {
-      try {
-        const res = await fetch('/api/posts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...post, status: post.status || 'published' })
-        });
-        if (res.ok) count++;
-      } catch (e) {}
-    }
-    
-    addLog(`Migração concluída: ${count} posts sincronizados na nuvem.`);
-    loadAllContent();
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,19 +71,17 @@ const AdminDashboard: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        addLog(`${data.count} rascunhos gerados com sucesso.`);
-        // Update state immediately with new drafts
+        addLog(`${data.count} rascunhos gerados e persistidos no Supabase.`);
         if (data.drafts && data.drafts.length > 0) {
           setDrafts(prev => [...data.drafts, ...prev]);
         }
         setThemes('');
-      } else throw new Error(data.error || "Erro desconhecido na API.");
+      } else throw new Error(data.error);
     } catch (error: any) { 
-      addLog(`Erro Curadoria: ${error.message}`); 
+      addLog(`Falha técnica: ${error.message}`); 
     } finally { 
       setIsGenerating(false); 
-      // Refresh just to be sure
-      loadAllContent();
+      loadAllContent(); // Força recarregamento do servidor para paridade total
     }
   };
 
@@ -127,13 +98,13 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handlePublish = async (id: string) => {
-    const post = (editingArticle && editingArticle.id === id) 
+    const post = editingArticle && editingArticle.id === id 
       ? editingArticle 
-      : (drafts.find(d => d.id === id) || publishedArticles.find(a => a.id === id));
+      : drafts.find(d => d.id === id);
 
     if (!post) return;
 
-    addLog(`Publicando: "${post.title}"...`);
+    addLog(`Publicando insight: ${post.title}...`);
     const publishedPost: Article = { 
       ...post, 
       status: 'published' as const,
@@ -142,22 +113,22 @@ const AdminDashboard: React.FC = () => {
 
     const ok = await saveToCloud(publishedPost);
     if (ok) {
-      addLog(`STATUS: "${publishedPost.title}" agora é PÚBLICO.`);
+      addLog("Insight lançado com sucesso.");
       loadAllContent();
       setEditingArticle(null);
       setActiveMode('manage');
-    } else addLog("Erro ao publicar no banco.");
+    } else addLog("Erro ao atualizar status na nuvem.");
   };
 
   const deleteArticle = async (id: string) => {
-    if (!confirm("Excluir permanentemente do banco de dados?")) return;
+    if (!confirm("Remover permanentemente do banco de dados?")) return;
     try {
       const res = await fetch(`/api/posts?id=${id}`, { method: 'DELETE' });
       if (res.ok) {
-        addLog("Registro removido da nuvem.");
+        addLog("Registro removido.");
         loadAllContent();
       }
-    } catch (e) { addLog("Falha na remoção."); }
+    } catch (e) { addLog("Erro na remoção."); }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,12 +144,12 @@ const AdminDashboard: React.FC = () => {
         body: file
       });
       const data = await response.json();
-      if (!data.success) throw new Error(data.reason || "Erro no upload");
+      if (!data.success) throw new Error(data.reason);
       setEditingArticle({ ...editingArticle, image: data.image_url });
-      addLog("Imagem sincronizada no cloud storage.");
+      addLog("Imagem sincronizada com sucesso.");
     } catch (e: any) { 
       alert(e.message); 
-      addLog(`Erro no Upload: ${e.message}`);
+      addLog(`Erro Upload: ${e.message}`);
     } finally { 
       setIsUploading(false); 
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -209,7 +180,6 @@ const AdminDashboard: React.FC = () => {
             <div className="flex gap-4 mt-6">
               <button onClick={() => setActiveMode('generate')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'generate' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Curadoria</button>
               <button onClick={() => setActiveMode('manage')} className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeMode === 'manage' ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite text-brand-muted'}`}>Biblioteca ({publishedArticles.length})</button>
-              <button onClick={migrateLegacyData} className="px-6 py-3 rounded-xl text-[10px] font-black uppercase bg-brand-amber text-brand-obsidian shadow-lg">Migrar Legado</button>
             </div>
           </div>
           <button onClick={() => supabase.auth.signOut()} className="px-8 py-4 rounded-xl border border-brand-graphite text-xs font-bold uppercase hover:text-red-500">Sair</button>
@@ -219,33 +189,27 @@ const AdminDashboard: React.FC = () => {
           <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
               <div className="lg:col-span-2 p-10 rounded-[3rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-2xl">
-                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Pautas para IA (um tema por linha)</label>
-                <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px] text-brand-soft" placeholder="Marketing Digital, Inteligência Artificial, Renda Online..." />
-                <button onClick={generateDailyPosts} disabled={isGenerating} className="w-full mt-6 py-6 rounded-2xl font-black text-xs uppercase bg-brand-cyan text-brand-obsidian shadow-xl shadow-brand-cyan/20 disabled:opacity-50 disabled:cursor-not-allowed">
-                  {isGenerating ? 'Processando Protocolo...' : 'Gerar Novos Rascunhos'}
+                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Pautas para IA</label>
+                <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px] text-brand-soft" placeholder="IA, Marketing, SEO..." />
+                <button onClick={generateDailyPosts} disabled={isGenerating} className="w-full mt-6 py-6 rounded-2xl font-black text-xs uppercase bg-brand-cyan text-brand-obsidian shadow-xl shadow-brand-cyan/20">
+                  {isGenerating ? 'Processando...' : 'Gerar Rascunhos'}
                 </button>
               </div>
               <div className="p-8 rounded-[3rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 overflow-y-auto max-h-[300px]">
-                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 uppercase text-[9px]">Log Editorial</div>
-                {logs.length === 0 ? <div className="text-brand-muted italic">Aguardando pautas...</div> : logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
+                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 uppercase text-[9px]">Log Sync</div>
+                {logs.length === 0 ? <div className="text-brand-muted italic">Aguardando...</div> : logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
               </div>
             </div>
             
             <div className="space-y-8">
               <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6 flex justify-between items-center">
-                Rascunhos Disponíveis
+                Rascunhos para Revisão
                 <span className="bg-brand-graphite px-4 py-1 rounded-full text-[10px] font-mono">{drafts.length} itens</span>
               </h2>
               
-              {isGenerating && drafts.length === 0 && (
-                <div className="py-20 text-center bg-brand-graphite/10 rounded-[3rem] border border-dashed border-brand-graphite animate-pulse">
-                  <p className="text-brand-muted font-bold uppercase text-[10px] tracking-widest">Sincronizando novos dados com a nuvem...</p>
-                </div>
-              )}
-              
-              {!isGenerating && drafts.length === 0 && (
-                <div className="py-20 text-center bg-brand-graphite/10 rounded-[3rem] border border-dashed border-brand-graphite">
-                  <p className="text-brand-muted font-bold uppercase text-[10px] tracking-widest">Nenhum rascunho pendente.</p>
+              {drafts.length === 0 && !isGenerating && (
+                <div className="py-20 text-center border-2 border-dashed border-brand-graphite/30 rounded-[3rem]">
+                   <p className="text-brand-muted uppercase font-black text-xs">Sem rascunhos pendentes</p>
                 </div>
               )}
               
@@ -258,7 +222,7 @@ const AdminDashboard: React.FC = () => {
                   </div>
                   <div className="flex gap-4">
                     <button onClick={() => setEditingArticle(draft)} className="text-[9px] font-black bg-white text-brand-obsidian px-6 py-3 rounded-xl hover:bg-brand-soft transition-colors">Revisar</button>
-                    <button onClick={() => handlePublish(draft.id)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl shadow-lg hover:bg-brand-purple hover:text-white transition-all">Publicar</button>
+                    <button onClick={() => handlePublish(draft.id)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl shadow-lg">Publicar</button>
                     <button onClick={() => deleteArticle(draft.id)} className="text-brand-muted hover:text-red-500 text-xl transition-colors">×</button>
                   </div>
                 </div>
@@ -269,21 +233,17 @@ const AdminDashboard: React.FC = () => {
 
         {activeMode === 'manage' && (
           <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Protocolos em Produção (Nuvem)</h2>
+            <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Biblioteca Online</h2>
             <div className="grid grid-cols-1 gap-6">
-              {publishedArticles.length === 0 ? (
-                <div className="py-20 text-center border-2 border-dashed border-brand-graphite/30 rounded-[3rem]">
-                   <p className="text-brand-muted uppercase font-black text-xs">Biblioteca Vazia</p>
-                </div>
-              ) : publishedArticles.map(article => (
+              {publishedArticles.map(article => (
                 <div key={article.id} className="p-8 rounded-[3rem] bg-brand-cyan/5 border border-brand-cyan/10 flex flex-col md:flex-row gap-8 items-center group hover:bg-brand-cyan/10 transition-all">
                   <img src={article.image} className="w-32 h-24 rounded-2xl object-cover bg-brand-obsidian shadow-lg" />
                   <div className="flex-grow">
                     <h3 className="text-lg font-black text-white mb-1">{article.title}</h3>
-                    <p className="text-[9px] text-brand-muted uppercase tracking-widest font-mono">{article.date} • {article.slug}</p>
+                    <p className="text-[9px] text-brand-muted uppercase tracking-widest font-mono">{article.date}</p>
                   </div>
                   <div className="flex gap-4">
-                    <button onClick={() => setEditingArticle(article)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl">✏️ Editar</button>
+                    <button onClick={() => setEditingArticle(article)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl">Editar</button>
                     <button onClick={() => deleteArticle(article.id)} className="text-brand-muted hover:text-red-500 text-xl transition-colors">×</button>
                   </div>
                 </div>
@@ -296,52 +256,38 @@ const AdminDashboard: React.FC = () => {
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 overflow-y-auto backdrop-blur-sm">
             <div className="bg-brand-graphite w-full max-w-5xl p-10 md:p-14 rounded-[3.5rem] border border-brand-graphite shadow-2xl space-y-8 my-8 relative animate-in fade-in zoom-in duration-300">
               <div className="flex justify-between items-center border-b border-brand-graphite pb-6">
-                <h2 className="text-3xl font-black uppercase text-brand-cyan">Editor de Nuvem</h2>
+                <h2 className="text-3xl font-black uppercase text-brand-cyan">Editor Cloud</h2>
                 <button onClick={() => setEditingArticle(null)} className="text-brand-muted hover:text-white text-3xl">×</button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Título do Protocolo</label>
-                    <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Título" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Sumário Executivo</label>
-                    <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm text-brand-soft leading-relaxed" placeholder="Resumo" />
-                  </div>
+                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Título" />
+                  <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm text-brand-soft" placeholder="Resumo" />
                 </div>
                 <div className="space-y-6">
                   <div className="rounded-[2.5rem] overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-2xl">
                     <img src={editingArticle.image} className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-brand-obsidian/80 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-2 rounded-xl font-black text-[10px] uppercase shadow-xl hover:bg-brand-cyan transition-colors mb-2">Substituir Imagem</button>
-                      <p className="text-[9px] text-brand-muted font-bold">Resolução Recomendada: 1280x720</p>
+                      <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-2 rounded-xl font-black text-[10px] uppercase shadow-xl hover:bg-brand-cyan">Trocar</button>
                     </div>
                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                     {isUploading && <div className="absolute inset-0 bg-brand-obsidian/60 backdrop-blur-sm flex items-center justify-center"><div className="w-8 h-8 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>}
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Classificação de Dados</label>
-                    <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Categoria" />
-                  </div>
+                  <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Categoria" />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Conteúdo Estruturado (HTML)</label>
-                <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed text-brand-soft" />
-              </div>
+              <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed text-brand-soft" />
 
               <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-brand-graphite">
                 <button onClick={async () => {
-                   addLog(`Salvando alterações em "${editingArticle.title}"...`);
+                   addLog("Sincronizando rascunho...");
                    const ok = await saveToCloud(editingArticle);
-                   if (ok) { addLog("Dados persistidos com sucesso."); setEditingArticle(null); loadAllContent(); }
-                   else addLog("Erro ao sincronizar dados.");
-                }} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest hover:border-white transition-all">Apenas Salvar</button>
-                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-brand-cyan/30 hover:bg-brand-purple hover:text-white transition-all">
-                   Publicar Imediatamente
+                   if (ok) { addLog("Salvo na nuvem."); setEditingArticle(null); loadAllContent(); }
+                }} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest">Apenas Salvar</button>
+                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-brand-cyan/30">
+                   Lançar no Feed
                 </button>
               </div>
             </div>

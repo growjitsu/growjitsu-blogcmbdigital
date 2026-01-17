@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import { Buffer } from 'buffer';
 
 export default async function handler(req: any, res: any) {
-  // Ensure we don't send multiple headers
   if (res.headersSent) return;
   res.setHeader('Content-Type', 'application/json');
 
@@ -34,16 +33,18 @@ export default async function handler(req: any, res: any) {
         const { data: { publicUrl } } = supabaseAdmin.storage.from(BUCKET_NAME).getPublicUrl(`ai/${fileName}`);
         return publicUrl;
       } catch (e) {
-        console.error("Storage upload error:", e);
+        console.error("Storage Error:", e);
         return null;
       }
     };
 
     const curatorResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: themes && themes.length > 0 ? `Gere 2 artigos aprofundados sobre: ${themes.join(", ")}.` : "Gere 2 artigos épicos sobre o futuro da IA e marketing digital.",
+      contents: themes && themes.length > 0 
+        ? `Gere 2 artigos detalhados sobre: ${themes.join(", ")}.` 
+        : "Gere 2 artigos sobre Tendências de IA e Marketing para 2025.",
       config: {
-        systemInstruction: "Você é o Editor-Chefe da CMBDIGITAL. Crie artigos de altíssima autoridade. Retorne APENAS um objeto JSON válido, sem blocos de código markdown.",
+        systemInstruction: "Editor-Chefe CMBDIGITAL. Retorne APENAS JSON. pt-BR. Use HTML semântico no conteúdo.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -72,74 +73,66 @@ export default async function handler(req: any, res: any) {
       }
     });
 
-    const textOutput = curatorResponse.text;
-    if (!textOutput) throw new Error("A IA não retornou conteúdo.");
-
-    // Clean markdown blocks if present
-    const cleanJson = textOutput.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsedData = JSON.parse(cleanJson);
+    const parsedData = JSON.parse(curatorResponse.text || '{"articles":[]}');
     const rawArticles = parsedData.articles || [];
 
     const articlesSaved = await Promise.all(rawArticles.map(async (art: any) => {
+      let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",tech")}`;
+      
       try {
         const imageRes = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
-          contents: { parts: [{ text: art.promptImagem + " - high resolution, professional photography style, editorial" }] },
+          contents: { parts: [{ text: art.promptImagem + " professional, editorial style, high quality" }] },
           config: { imageConfig: { aspectRatio: "16:9" } }
         });
 
-        let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category)}`;
         if (imageRes.candidates?.[0]?.content?.parts) {
           for (const part of imageRes.candidates[0].content.parts) {
             if (part.inlineData) {
               const storedUrl = await saveToStorage(part.inlineData.data, art.slug);
-              imageUrl = storedUrl || imageUrl;
+              if (storedUrl) imageUrl = storedUrl;
               break;
             }
           }
         }
+      } catch (imgError) {
+        console.warn("IA Image generation failed, using Unsplash fallback.");
+      }
 
-        const newPost = {
-          id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
-          slug: art.slug,
-          title: art.title,
-          excerpt: art.excerpt,
-          content: art.content,
-          category: art.category,
-          author: 'CMBDIGITAL',
-          date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
-          image: imageUrl,
-          tags: art.tags,
-          status: 'draft',
-          meta_title: art.metaTitle,
-          meta_description: art.metaDescription,
-          created_at: new Date().toISOString()
-        };
+      const newPost = {
+        id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
+        slug: art.slug,
+        title: art.title,
+        excerpt: art.excerpt,
+        content: art.content,
+        category: art.category,
+        author: 'CMBDIGITAL',
+        date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
+        image: imageUrl,
+        tags: art.tags,
+        status: 'draft',
+        meta_title: art.metaTitle,
+        meta_description: art.metaDescription,
+        created_at: new Date().toISOString()
+      };
 
-        // Persistência direta no Banco de Dados
-        const { error: insertError } = await supabaseAdmin.from('posts').insert([newPost]);
-        if (insertError) {
-          console.error("Error inserting post:", insertError.message);
-          return null;
-        }
-        
-        return newPost;
-      } catch (e) {
-        console.error("Error generating individual article:", e);
+      const { error: dbError } = await supabaseAdmin.from('posts').insert([newPost]);
+      if (dbError) {
+        console.error("Supabase Insert Error:", dbError.message);
         return null;
       }
+      return newPost;
     }));
 
-    const successfulDrafts = articlesSaved.filter(Boolean);
-
+    const finalDrafts = articlesSaved.filter(Boolean);
     return res.status(200).json({ 
       success: true, 
-      count: successfulDrafts.length,
-      drafts: successfulDrafts
+      count: finalDrafts.length, 
+      drafts: finalDrafts 
     });
 
   } catch (error: any) {
-    console.error("Curadoria API Error:", error.message);
+    console.error("Critical Curation Error:", error);
     return res.status(500).json({ success: false, error: error.message });
   }
 }
