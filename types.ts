@@ -8,13 +8,15 @@ export interface Article {
   category: string;
   author: string;
   date: string;
-  image: string;
-  image_source?: 'ai' | 'upload';
+  image: string; // Mapeado no frontend
+  image_url?: string; // Campo real no banco
   metaTitle: string;
   metaDescription: string;
   tags: string[];
-  status?: 'published' | 'draft';
+  status: 'published' | 'pending' | 'draft';
   created_at?: string;
+  updated_at?: string;
+  published_at?: string;
 }
 
 export interface NavLink {
