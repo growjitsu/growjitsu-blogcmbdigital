@@ -5,6 +5,8 @@ const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+const TABLE_NAME = 'articles';
+
 const mapToFrontend = (p: any) => ({
   ...p,
   metaTitle: p.meta_title || p.metaTitle || '',
@@ -18,18 +20,18 @@ export default async function handler(req: any, res: any) {
 
       if (slug) {
         const { data, error } = await supabase
-          .from('posts')
+          .from(TABLE_NAME)
           .select('*')
           .eq('slug', slug)
           .single();
         
         if (error) {
-          return res.status(404).json({ success: false, error: 'Post não localizado no ecossistema.' });
+          return res.status(404).json({ success: false, error: 'Protocolo não localizado no banco.' });
         }
         return res.status(200).json({ success: true, article: mapToFrontend(data) });
       }
 
-      let query = supabase.from('posts').select('*');
+      let query = supabase.from(TABLE_NAME).select('*');
       if (status) query = query.eq('status', status);
       
       const { data, error } = await query.order('created_at', { ascending: false });
@@ -46,7 +48,7 @@ export default async function handler(req: any, res: any) {
       }
 
       const { error } = await supabase
-        .from('posts')
+        .from(TABLE_NAME)
         .upsert({
           id: article.id,
           slug: article.slug,
@@ -73,12 +75,12 @@ export default async function handler(req: any, res: any) {
       if (!id) {
         return res.status(400).json({ success: false, error: 'ID de protocolo ausente.' });
       }
-      const { error } = await supabase.from('posts').delete().eq('id', id);
+      const { error } = await supabase.from(TABLE_NAME).delete().eq('id', id);
       if (error) throw error;
       return res.status(200).json({ success: true, message: 'Protocolo removido da nuvem.' });
     }
 
-    return res.status(405).json({ success: false, error: 'Método não autorizado pelo terminal.' });
+    return res.status(405).json({ success: false, error: 'Método não autorizado.' });
 
   } catch (error: any) {
     console.error("POSTS_API_ERROR:", error.message);

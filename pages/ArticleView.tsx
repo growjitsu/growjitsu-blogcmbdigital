@@ -25,12 +25,24 @@ const ArticleView: React.FC = () => {
     setIsLoading(true);
     try {
       const response = await fetch(`/api/posts?slug=${slug}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("Formato de resposta inválido.");
+      }
+
       const data = await response.json();
       if (data.success) {
         setArticle(data.article);
+      } else {
+        throw new Error(data.error);
       }
-    } catch (err) {
-      console.error("Erro ao carregar artigo da nuvem:", err);
+    } catch (err: any) {
+      console.error("Erro ao carregar artigo da nuvem:", err.message);
     } finally {
       setIsLoading(false);
     }

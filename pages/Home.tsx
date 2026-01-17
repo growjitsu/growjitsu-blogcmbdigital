@@ -25,12 +25,26 @@ const Home: React.FC = () => {
     setIsLoading(true);
     try {
       const response = await fetch('/api/posts?status=published');
+      
+      if (!response.ok) {
+        throw new Error(`Falha na conexão: Status ${response.status}`);
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await response.text();
+        console.error("Resposta não-JSON recebida:", text);
+        throw new Error("O servidor retornou um formato de dados inválido.");
+      }
+
       const data = await response.json();
       if (data.success) {
         setAllArticles(data.articles || []);
+      } else {
+        throw new Error(data.error || "Erro desconhecido ao carregar artigos.");
       }
-    } catch (err) {
-      console.error("Falha ao carregar artigos do banco:", err);
+    } catch (err: any) {
+      console.error("Falha ao carregar artigos do banco:", err.message);
     } finally {
       setIsLoading(false);
     }
@@ -82,6 +96,7 @@ const Home: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
+      
       const data = await response.json();
       if (data.success) {
         setMessage({ type: 'success', text: data.message });

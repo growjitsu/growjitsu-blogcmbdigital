@@ -12,6 +12,7 @@ export default async function handler(req: any, res: any) {
   const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
   const BUCKET_NAME = 'blog-images';
+  const TABLE_NAME = 'articles'; // Atualizado para o nome real da tabela identificada
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -129,7 +130,7 @@ export default async function handler(req: any, res: any) {
     }));
 
     const { data: insertedData, error: dbError } = await supabaseAdmin
-      .from('posts')
+      .from(TABLE_NAME)
       .insert(articlesToInsert)
       .select();
 

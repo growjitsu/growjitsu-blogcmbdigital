@@ -2,8 +2,6 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req: any, res: any) {
-  res.setHeader('Content-Type', 'application/json');
-
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Método não permitido' });
   }
@@ -15,7 +13,6 @@ export default async function handler(req: any, res: any) {
   }
 
   const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
-  // Utiliza chave de serviço para bypass de RLS em operações administrativas (Newsletter)
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
 
   try {
@@ -26,15 +23,12 @@ export default async function handler(req: any, res: any) {
       }
     });
 
-    // Etapa 1: Verificar existência sem causar erro 406 (Not Acceptable) do PostgREST
-    // .single() gera erro se 0 linhas forem encontradas. .select() é mais seguro para checagem.
     const { data: existing, error: checkError } = await supabaseAdmin
       .from('newsletter_subscribers')
       .select('email')
       .eq('email', email.toLowerCase().trim());
 
     if (checkError) {
-      // Se a tabela não existir, o erro será capturado aqui.
       console.error("Erro na verificação da tabela newsletter_subscribers:", checkError.message);
       throw new Error(`Falha na base de dados: ${checkError.message}`);
     }
@@ -46,7 +40,6 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Etapa 2: Inserção do novo assinante
     const { error: insertError } = await supabaseAdmin
       .from('newsletter_subscribers')
       .insert([
@@ -57,7 +50,6 @@ export default async function handler(req: any, res: any) {
       ]);
 
     if (insertError) {
-      // Tratamento específico para erro de duplicata (Unique Constraint)
       if (insertError.code === '23505') {
         return res.status(200).json({ 
           success: true, 
@@ -73,11 +65,12 @@ export default async function handler(req: any, res: any) {
     });
 
   } catch (error: any) {
-    console.error("NEWSLETTER_SUBSCRIPTION_ERROR:", error);
-    // Retorna a mensagem real do erro para o frontend conseguir identificar o problema exato (ex: Tabela não encontrada)
-    return res.status(500).json({ 
-      success: false, 
-      error: `Erro ao processar assinatura: ${error.message || 'Falha técnica desconhecida.'}` 
-    });
+    console.error("NEWSLETTER_SUBSCRIPTION_ERROR:", error.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ 
+        success: false, 
+        error: `Erro ao processar assinatura: ${error.message || 'Falha técnica.'}` 
+      });
+    }
   }
 }
