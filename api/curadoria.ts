@@ -12,7 +12,7 @@ export default async function handler(req: any, res: any) {
   const supabaseUrl = 'https://qgwgvtcjaagrmwzrutxm.supabase.co';
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnd2d2dGNqYWFncm13enJ1dHhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODE3NzU4NiwiZXhwIjoyMDgzNzUzNTg2fQ.kwrkF8B24jCk4RvenX8qr2ot4pLVwVCUhHkbWfmQKpE';
   const BUCKET_NAME = 'blog-images';
-  const TABLE_NAME = 'articles'; // Atualizado para o nome real da tabela identificada
+  const TABLE_NAME = 'posts';
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -34,25 +34,13 @@ export default async function handler(req: any, res: any) {
       }
     };
 
-    const extractJson = (text: string) => {
-      try {
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}');
-        if (start === -1 || end === -1) return null;
-        const jsonPart = text.substring(start, end + 1);
-        return JSON.parse(jsonPart);
-      } catch (e) {
-        return null;
-      }
-    };
-
     const curatorResponse = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: themes && themes.length > 0 
-        ? `Gere 2 artigos épicos sobre: ${themes.join(", ")}.` 
-        : "Gere 2 artigos sobre Inteligência Artificial e Marketing Digital para 2025.",
+        ? `Gere 2 artigos estratégicos e completos sobre: ${themes.join(", ")}.` 
+        : "Gere 2 artigos épicos sobre Inteligência Artificial e Marketing de Performance para 2025.",
       config: {
-        systemInstruction: "Editor-Chefe CMBDIGITAL. Retorne APENAS um objeto JSON válido seguindo o schema. Use pt-BR e HTML semântico.",
+        systemInstruction: "Você é o Editor-Chefe da CMBDIGITAL. Retorne estritamente um JSON. Use pt-BR e HTML semântico.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -72,7 +60,7 @@ export default async function handler(req: any, res: any) {
                   metaTitle: { type: Type.STRING },
                   metaDescription: { type: Type.STRING }
                 },
-                required: ["slug", "title", "excerpt", "content", "category", "tags", "promptImagem", "metaTitle", "metaDescription"]
+                required: ["slug", "title", "excerpt", "content", "category", "tags", "promptImagem"]
               }
             }
           },
@@ -82,21 +70,19 @@ export default async function handler(req: any, res: any) {
     });
 
     const aiText = curatorResponse.text;
-    if (!aiText) throw new Error("IA offline.");
+    if (!aiText) throw new Error("A IA não retornou dados.");
 
-    const parsedData = extractJson(aiText);
-    if (!parsedData || !parsedData.articles) {
-      throw new Error("Protocolo de IA corrompido.");
-    }
+    const parsedData = JSON.parse(aiText);
+    if (!parsedData || !parsedData.articles) throw new Error("Formato de rascunhos inválido.");
 
     const rawArticles = parsedData.articles;
     const articlesToInsert = await Promise.all(rawArticles.map(async (art: any) => {
-      let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",tech")}`;
+      let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",technology")}`;
       
       try {
         const imageRes = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
-          contents: { parts: [{ text: art.promptImagem + " professional editorial photography style" }] },
+          contents: { parts: [{ text: art.promptImagem + " cinematic photography, professional high-end look" }] },
           config: { imageConfig: { aspectRatio: "16:9" } }
         });
 
@@ -109,7 +95,7 @@ export default async function handler(req: any, res: any) {
             }
           }
         }
-      } catch (e) { /* fallback active */ }
+      } catch (e) { /* fallback image used */ }
 
       return {
         id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
@@ -120,11 +106,11 @@ export default async function handler(req: any, res: any) {
         category: art.category,
         author: 'CMBDIGITAL',
         date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
-        image: imageUrl,
+        image_url: imageUrl,
         tags: art.tags,
-        status: 'draft',
-        meta_title: art.metaTitle,
-        meta_description: art.metaDescription,
+        status: 'pending', // SALVAR COMO PENDING CONFORME ORIENTAÇÃO
+        meta_title: art.metaTitle || art.title,
+        meta_description: art.metaDescription || art.excerpt,
         created_at: new Date().toISOString()
       };
     }));
@@ -134,7 +120,7 @@ export default async function handler(req: any, res: any) {
       .insert(articlesToInsert)
       .select();
 
-    if (dbError) throw new Error(`Banco offline: ${dbError.message}`);
+    if (dbError) throw new Error(`Supabase Error: ${dbError.message}`);
 
     return res.status(200).json({ 
       success: true, 
