@@ -14,6 +14,7 @@ export interface Article {
   metaDescription: string;
   tags: string[];
   status?: 'published' | 'draft';
+  created_at?: string;
 }
 
 export interface NavLink {

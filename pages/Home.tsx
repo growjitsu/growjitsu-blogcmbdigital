@@ -1,34 +1,14 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ARTICLES as STATIC_ARTICLES } from '../data/articles';
 import ArticleCard from '../components/ArticleCard';
 import { Article } from '../types';
 
 const ITEMS_PER_PAGE = 15;
 
-const parseDate = (dateStr: string) => {
-  if (!dateStr) return new Date(0);
-  const months: { [key: string]: number } = {
-    'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
-    'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
-  };
-  try {
-    const cleanStr = dateStr.toLowerCase().replace(/ de /g, ' ').replace(/,/g, '').trim();
-    const parts = cleanStr.split(/\s+/);
-    if (parts.length >= 3) {
-      const day = parseInt(parts[0]);
-      const month = months[parts[1]];
-      const year = parseInt(parts[2]);
-      if (!isNaN(day) && month !== undefined && !isNaN(year)) return new Date(year, month, day);
-    }
-    const fallbackDate = new Date(dateStr);
-    return isNaN(fallbackDate.getTime()) ? new Date(0) : fallbackDate;
-  } catch (e) { return new Date(0); }
-};
-
 const Home: React.FC = () => {
   const [allArticles, setAllArticles] = useState<Article[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -38,14 +18,23 @@ const Home: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   useEffect(() => {
-    const publishedInStorage: Article[] = JSON.parse(localStorage.getItem('cmb_published') || '[]');
-    const storageSlugs = new Set(publishedInStorage.map(a => a.slug));
-    const filteredStatic = STATIC_ARTICLES.filter(a => !storageSlugs.has(a.slug));
-    const combined = [...publishedInStorage, ...filteredStatic].sort((a, b) => {
-      return parseDate(b.date).getTime() - parseDate(a.date).getTime();
-    });
-    setAllArticles(combined);
+    fetchArticles();
   }, []);
+
+  const fetchArticles = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/posts?status=published');
+      const data = await response.json();
+      if (data.success) {
+        setAllArticles(data.articles || []);
+      }
+    } catch (err) {
+      console.error("Falha ao carregar artigos do banco:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const filteredArticles = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
@@ -67,7 +56,6 @@ const Home: React.FC = () => {
   const featured = allArticles[0];
 
   useEffect(() => {
-    setCurrentPage(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [searchQuery, currentPage]);
 
@@ -86,10 +74,8 @@ const Home: React.FC = () => {
       setMessage({ type: 'error', text: 'Protocolo inválido: Insira um e-mail correto.' });
       return;
     }
-
     setIsSubmitting(true);
     setMessage(null);
-
     try {
       const response = await fetch('/api/newsletter', {
         method: 'POST',
@@ -97,15 +83,12 @@ const Home: React.FC = () => {
         body: JSON.stringify({ email })
       });
       const data = await response.json();
-      
       if (data.success) {
-        setMessage({ type: 'success', text: data.message || 'Sincronização estabelecida!' });
+        setMessage({ type: 'success', text: data.message });
         setEmail('');
-      } else {
-        throw new Error(data.error || 'Falha na conexão com o servidor.');
-      }
+      } else throw new Error(data.error);
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Erro de rede. Tente novamente.' });
+      setMessage({ type: 'error', text: err.message });
     } finally {
       setIsSubmitting(false);
     }
@@ -118,7 +101,7 @@ const Home: React.FC = () => {
         <div className="container mx-auto px-4 md:px-6 relative z-10 text-center">
           <div className="inline-flex items-center space-x-3 px-5 py-2 rounded-full mb-10 shadow-xl dark:bg-brand-graphite dark:border-brand-graphite bg-slate-50 border border-slate-200">
             <span className="flex h-2 w-2 rounded-full bg-brand-cyan animate-pulse"></span>
-            <span className="text-[10px] font-black uppercase tracking-[0.3em] dark:text-brand-soft text-slate-600">Sincronização Cronológica Ativa</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] dark:text-brand-soft text-slate-600">Sincronização Ativa na Nuvem</span>
           </div>
           <h1 className="text-6xl md:text-9xl font-black mb-12 tracking-tighter leading-[0.85] dark:text-brand-soft text-slate-900">
             O Hub da <br/> <span className="text-brand-cyan font-serif italic font-light lowercase">autoridade digital.</span>
@@ -129,7 +112,9 @@ const Home: React.FC = () => {
         </div>
       </section>
 
-      {featured && currentPage === 1 && !searchQuery && (
+      {isLoading ? (
+        <div className="flex justify-center py-40"><div className="w-12 h-12 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>
+      ) : featured && currentPage === 1 && !searchQuery && (
         <section className="container mx-auto px-4 md:px-6 -mt-32 relative z-20">
           <div className="max-w-6xl mx-auto">
              <div className="rounded-[4rem] shadow-2xl overflow-hidden flex flex-col lg:flex-row border transition-all duration-700 dark:bg-brand-graphite dark:border-brand-graphite group bg-white border-slate-200 hover:border-brand-purple/30">
@@ -175,23 +160,17 @@ const Home: React.FC = () => {
             {totalPages > 1 && (
               <div className="mt-24 flex justify-center items-center gap-3">
                 <button onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase border dark:border-brand-graphite disabled:opacity-20 transition-all">Anterior</button>
-                <div className="flex gap-2">
-                   {[...Array(totalPages)].map((_, i) => (
-                     <button key={i} onClick={() => setCurrentPage(i+1)} className={`w-10 h-10 rounded-lg text-[10px] font-black transition-all ${currentPage === i+1 ? 'bg-brand-cyan text-brand-obsidian' : 'bg-brand-graphite/20 text-brand-muted'}`}>{i+1}</button>
-                   ))}
-                </div>
                 <button onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages} className="px-6 py-4 rounded-xl font-black text-[10px] uppercase bg-brand-cyan text-brand-obsidian disabled:opacity-20 transition-all">Próximo</button>
               </div>
             )}
           </>
-        ) : (
+        ) : !isLoading && (
           <div className="py-40 text-center border-2 border-dashed border-brand-graphite/30 rounded-[4rem]">
-            <h3 className="text-2xl font-black text-brand-muted">Busca sem resultados no banco de dados.</h3>
+            <h3 className="text-2xl font-black text-brand-muted">Busca sem resultados na nuvem.</h3>
           </div>
         )}
       </section>
 
-      {/* Seção Newsletter Exclusiva */}
       <section id="newsletter" className="container mx-auto px-4 md:px-6 mt-40">
         <div className="max-w-6xl mx-auto rounded-[5rem] overflow-hidden relative group dark:bg-brand-graphite bg-white border dark:border-brand-graphite border-slate-200 shadow-2xl transition-all duration-500 hover:shadow-brand-cyan/5">
           <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-brand-cyan/5 via-transparent to-brand-purple/5 pointer-events-none"></div>
@@ -201,40 +180,14 @@ const Home: React.FC = () => {
               <h2 className="text-4xl md:text-7xl font-black tracking-tighter leading-[1] mb-8 dark:text-brand-soft text-slate-900">
                 Receba <span className="text-brand-purple italic font-serif lowercase font-light">insights</span> de elite.
               </h2>
-              <p className="text-xl font-medium dark:text-brand-muted text-slate-600">
-                Junte-se a +150 mil leitores e receba semanalmente os protocolos validados de IA e Marketing diretamente na sua caixa de entrada.
-              </p>
             </div>
-            
             <div className="w-full max-w-md">
               <form onSubmit={handleNewsletterSubmit} className="space-y-6">
-                <div className="relative">
-                  <input 
-                    type="email" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Seu melhor e-mail corporativo" 
-                    required
-                    className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-[2rem] px-8 py-6 text-brand-soft focus:border-brand-cyan outline-none transition-all font-bold placeholder:text-brand-muted/40 dark:bg-brand-obsidian bg-slate-50 border-slate-100" 
-                  />
-                  <button 
-                    type="submit" 
-                    disabled={isSubmitting}
-                    className="w-full mt-4 bg-brand-cyan text-brand-obsidian py-6 rounded-[2rem] font-black text-xs uppercase tracking-[0.4em] hover:bg-brand-purple hover:text-white transition-all transform hover:-translate-y-1 shadow-2xl shadow-brand-cyan/20 disabled:opacity-50"
-                  >
-                    {isSubmitting ? 'Processando Inscrição...' : 'Assinar News'}
-                  </button>
-                </div>
-                
-                {message && (
-                  <div className={`text-center py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest animate-in fade-in slide-in-from-top-2 duration-300 ${message.type === 'success' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                    {message.text}
-                  </div>
-                )}
-                
-                <p className="text-[9px] text-center dark:text-brand-muted text-slate-400 font-bold uppercase tracking-widest opacity-60">
-                  Respeitamos sua caixa de entrada. Sem spam, apenas autoridade.
-                </p>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Seu melhor e-mail corporativo" required className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-[2rem] px-8 py-6 text-brand-soft focus:border-brand-cyan outline-none transition-all font-bold placeholder:text-brand-muted/40" />
+                <button type="submit" disabled={isSubmitting} className="w-full mt-4 bg-brand-cyan text-brand-obsidian py-6 rounded-[2rem] font-black text-xs uppercase tracking-[0.4em] hover:bg-brand-purple hover:text-white transition-all transform hover:-translate-y-1 shadow-2xl shadow-brand-cyan/20">
+                  {isSubmitting ? 'Sincronizando...' : 'Assinar News'}
+                </button>
+                {message && <div className={`text-center py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest ${message.type === 'success' ? 'text-green-500' : 'text-red-500'}`}>{message.text}</div>}
               </form>
             </div>
           </div>
