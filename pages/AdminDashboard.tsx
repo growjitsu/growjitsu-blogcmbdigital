@@ -46,13 +46,13 @@ const AdminDashboard: React.FC = () => {
       const dataPub = await resPub.json();
       if (dataPub.success) setPublishedArticles(dataPub.articles || []);
     } catch (e) {
+      console.error("Sync Error:", e);
       addLog("Erro ao sincronizar com banco de dados.");
     }
   };
 
-  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-8));
+  const addLog = (msg: string) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
 
-  // Migrador de Legado: Garante que dados locais e estáticos subam para a nuvem uma única vez
   const migrateLegacyData = async () => {
     if (!confirm("Isso irá migrar posts estáticos e locais para o Banco de Dados. Continuar?")) return;
     addLog("Iniciando migração de legado...");
@@ -87,6 +87,7 @@ const AdminDashboard: React.FC = () => {
   };
 
   const generateDailyPosts = async () => {
+    if (isGenerating) return;
     setIsGenerating(true);
     addLog("Iniciando Protocolo de Curadoria...");
     try {
@@ -97,11 +98,20 @@ const AdminDashboard: React.FC = () => {
       });
       const data = await response.json();
       if (data.success) {
-        addLog(`${data.count} rascunhos salvos no banco de dados.`);
-        loadAllContent();
+        addLog(`${data.count} rascunhos gerados com sucesso.`);
+        // Update state immediately with new drafts
+        if (data.drafts && data.drafts.length > 0) {
+          setDrafts(prev => [...data.drafts, ...prev]);
+        }
         setThemes('');
-      } else throw new Error(data.error);
-    } catch (error: any) { addLog(`Erro Curadoria: ${error.message}`); } finally { setIsGenerating(false); }
+      } else throw new Error(data.error || "Erro desconhecido na API.");
+    } catch (error: any) { 
+      addLog(`Erro Curadoria: ${error.message}`); 
+    } finally { 
+      setIsGenerating(false); 
+      // Refresh just to be sure
+      loadAllContent();
+    }
   };
 
   const saveToCloud = async (article: Article) => {
@@ -123,6 +133,7 @@ const AdminDashboard: React.FC = () => {
 
     if (!post) return;
 
+    addLog(`Publicando: "${post.title}"...`);
     const publishedPost: Article = { 
       ...post, 
       status: 'published' as const,
@@ -162,7 +173,7 @@ const AdminDashboard: React.FC = () => {
         body: file
       });
       const data = await response.json();
-      if (!data.success) throw new Error(data.reason);
+      if (!data.success) throw new Error(data.reason || "Erro no upload");
       setEditingArticle({ ...editingArticle, image: data.image_url });
       addLog("Imagem sincronizada no cloud storage.");
     } catch (e: any) { 
@@ -205,36 +216,50 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         {activeMode === 'generate' && (
-          <div className="space-y-12">
+          <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
               <div className="lg:col-span-2 p-10 rounded-[3rem] bg-brand-graphite/40 border border-brand-graphite/50 shadow-2xl">
-                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Pautas para IA</label>
-                <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px]" placeholder="IA, Marketing, SaaS..." />
-                <button onClick={generateDailyPosts} disabled={isGenerating} className="w-full mt-6 py-6 rounded-2xl font-black text-xs uppercase bg-brand-cyan text-brand-obsidian shadow-xl shadow-brand-cyan/20">
-                  {isGenerating ? 'Curando na Nuvem...' : 'Processar Curadoria'}
+                <label className="block text-[10px] font-black uppercase tracking-[0.4em] text-brand-cyan mb-6">Pautas para IA (um tema por linha)</label>
+                <textarea value={themes} onChange={(e) => setThemes(e.target.value)} className="w-full bg-brand-obsidian border border-brand-graphite/50 rounded-2xl px-6 py-6 text-sm focus:border-brand-cyan outline-none min-h-[140px] text-brand-soft" placeholder="Marketing Digital, Inteligência Artificial, Renda Online..." />
+                <button onClick={generateDailyPosts} disabled={isGenerating} className="w-full mt-6 py-6 rounded-2xl font-black text-xs uppercase bg-brand-cyan text-brand-obsidian shadow-xl shadow-brand-cyan/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {isGenerating ? 'Processando Protocolo...' : 'Gerar Novos Rascunhos'}
                 </button>
               </div>
               <div className="p-8 rounded-[3rem] bg-black/40 border border-brand-graphite/50 font-mono text-[10px] text-brand-cyan/80 overflow-y-auto max-h-[300px]">
-                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 uppercase text-[9px]">Terminal Sync</div>
-                {logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
+                <div className="mb-4 text-white font-black border-b border-brand-graphite pb-2 uppercase text-[9px]">Log Editorial</div>
+                {logs.length === 0 ? <div className="text-brand-muted italic">Aguardando pautas...</div> : logs.map((l, i) => <div key={i} className="mb-1">{l}</div>)}
               </div>
             </div>
+            
             <div className="space-y-8">
               <h2 className="text-2xl font-black uppercase tracking-widest text-white border-b border-brand-graphite pb-6 flex justify-between items-center">
-                Aguardando Validação (Nuvem)
+                Rascunhos Disponíveis
                 <span className="bg-brand-graphite px-4 py-1 rounded-full text-[10px] font-mono">{drafts.length} itens</span>
               </h2>
+              
+              {isGenerating && drafts.length === 0 && (
+                <div className="py-20 text-center bg-brand-graphite/10 rounded-[3rem] border border-dashed border-brand-graphite animate-pulse">
+                  <p className="text-brand-muted font-bold uppercase text-[10px] tracking-widest">Sincronizando novos dados com a nuvem...</p>
+                </div>
+              )}
+              
+              {!isGenerating && drafts.length === 0 && (
+                <div className="py-20 text-center bg-brand-graphite/10 rounded-[3rem] border border-dashed border-brand-graphite">
+                  <p className="text-brand-muted font-bold uppercase text-[10px] tracking-widest">Nenhum rascunho pendente.</p>
+                </div>
+              )}
+              
               {drafts.map(draft => (
-                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 items-center group hover:border-brand-cyan transition-all">
+                <div key={draft.id} className="p-8 rounded-[3rem] bg-brand-graphite/20 border border-brand-graphite flex flex-col md:flex-row gap-8 items-center group hover:border-brand-cyan transition-all animate-in zoom-in duration-300">
                   <img src={draft.image} className="w-40 h-28 rounded-2xl object-cover bg-brand-obsidian" />
                   <div className="flex-grow">
                     <h3 className="text-xl font-black text-white mb-2">{draft.title}</h3>
                     <p className="text-[10px] text-brand-muted uppercase font-bold">{draft.category} • {draft.date}</p>
                   </div>
                   <div className="flex gap-4">
-                    <button onClick={() => setEditingArticle(draft)} className="text-[9px] font-black bg-white text-brand-obsidian px-6 py-3 rounded-xl">Revisar</button>
-                    <button onClick={() => handlePublish(draft.id)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl shadow-lg">Publicar</button>
-                    <button onClick={() => deleteArticle(draft.id)} className="text-brand-muted text-xl">×</button>
+                    <button onClick={() => setEditingArticle(draft)} className="text-[9px] font-black bg-white text-brand-obsidian px-6 py-3 rounded-xl hover:bg-brand-soft transition-colors">Revisar</button>
+                    <button onClick={() => handlePublish(draft.id)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl shadow-lg hover:bg-brand-purple hover:text-white transition-all">Publicar</button>
+                    <button onClick={() => deleteArticle(draft.id)} className="text-brand-muted hover:text-red-500 text-xl transition-colors">×</button>
                   </div>
                 </div>
               ))}
@@ -243,10 +268,14 @@ const AdminDashboard: React.FC = () => {
         )}
 
         {activeMode === 'manage' && (
-          <div className="space-y-12">
+          <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <h2 className="text-2xl font-black uppercase tracking-widest text-brand-cyan border-b border-brand-cyan/20 pb-6">Protocolos em Produção (Nuvem)</h2>
             <div className="grid grid-cols-1 gap-6">
-              {publishedArticles.map(article => (
+              {publishedArticles.length === 0 ? (
+                <div className="py-20 text-center border-2 border-dashed border-brand-graphite/30 rounded-[3rem]">
+                   <p className="text-brand-muted uppercase font-black text-xs">Biblioteca Vazia</p>
+                </div>
+              ) : publishedArticles.map(article => (
                 <div key={article.id} className="p-8 rounded-[3rem] bg-brand-cyan/5 border border-brand-cyan/10 flex flex-col md:flex-row gap-8 items-center group hover:bg-brand-cyan/10 transition-all">
                   <img src={article.image} className="w-32 h-24 rounded-2xl object-cover bg-brand-obsidian shadow-lg" />
                   <div className="flex-grow">
@@ -255,7 +284,7 @@ const AdminDashboard: React.FC = () => {
                   </div>
                   <div className="flex gap-4">
                     <button onClick={() => setEditingArticle(article)} className="text-[9px] font-black bg-brand-cyan text-brand-obsidian px-6 py-3 rounded-xl">✏️ Editar</button>
-                    <button onClick={() => deleteArticle(article.id)} className="text-brand-muted text-xl">×</button>
+                    <button onClick={() => deleteArticle(article.id)} className="text-brand-muted hover:text-red-500 text-xl transition-colors">×</button>
                   </div>
                 </div>
               ))}
@@ -273,30 +302,46 @@ const AdminDashboard: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <div className="space-y-6">
-                  <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Título" />
-                  <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm text-brand-soft" placeholder="Resumo" />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Título do Protocolo</label>
+                    <input type="text" value={editingArticle.title} onChange={(e) => setEditingArticle({...editingArticle, title: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Título" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Sumário Executivo</label>
+                    <textarea value={editingArticle.excerpt} onChange={(e) => setEditingArticle({...editingArticle, excerpt: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none h-28 text-sm text-brand-soft leading-relaxed" placeholder="Resumo" />
+                  </div>
                 </div>
                 <div className="space-y-6">
                   <div className="rounded-[2.5rem] overflow-hidden border border-brand-graphite h-52 bg-brand-obsidian relative group shadow-2xl">
                     <img src={editingArticle.image} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-brand-obsidian/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-2 rounded-xl font-black text-[10px] uppercase shadow-xl hover:bg-brand-cyan">Trocar</button>
+                    <div className="absolute inset-0 bg-brand-obsidian/80 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => fileInputRef.current?.click()} className="bg-white text-brand-obsidian px-6 py-2 rounded-xl font-black text-[10px] uppercase shadow-xl hover:bg-brand-cyan transition-colors mb-2">Substituir Imagem</button>
+                      <p className="text-[9px] text-brand-muted font-bold">Resolução Recomendada: 1280x720</p>
                     </div>
                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                    {isUploading && <div className="absolute inset-0 bg-brand-obsidian/60 backdrop-blur-sm flex items-center justify-center"><div className="w-8 h-8 border-4 border-brand-cyan border-t-transparent rounded-full animate-spin"></div></div>}
                   </div>
-                  <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Categoria" />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Classificação de Dados</label>
+                    <input type="text" value={editingArticle.category} onChange={(e) => setEditingArticle({...editingArticle, category: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-2xl px-6 py-5 outline-none focus:border-brand-cyan text-brand-soft" placeholder="Categoria" />
+                  </div>
                 </div>
               </div>
 
-              <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed text-brand-soft" />
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-brand-muted ml-2">Conteúdo Estruturado (HTML)</label>
+                <textarea value={editingArticle.content} onChange={(e) => setEditingArticle({...editingArticle, content: e.target.value})} className="w-full bg-brand-obsidian border border-brand-graphite rounded-3xl px-8 py-8 outline-none h-80 font-mono text-sm leading-relaxed text-brand-soft" />
+              </div>
 
               <div className="flex flex-col sm:flex-row gap-4 pt-8 border-t border-brand-graphite">
                 <button onClick={async () => {
+                   addLog(`Salvando alterações em "${editingArticle.title}"...`);
                    const ok = await saveToCloud(editingArticle);
-                   if (ok) { addLog("Sincronizado com Nuvem."); setEditingArticle(null); loadAllContent(); }
-                }} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest hover:border-white transition-all">Sincronizar Cloud</button>
-                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-brand-cyan/30">
-                   Lançar em Produção
+                   if (ok) { addLog("Dados persistidos com sucesso."); setEditingArticle(null); loadAllContent(); }
+                   else addLog("Erro ao sincronizar dados.");
+                }} className="flex-grow bg-brand-graphite border border-brand-graphite text-white py-6 rounded-2xl font-black uppercase tracking-widest hover:border-white transition-all">Apenas Salvar</button>
+                <button onClick={() => handlePublish(editingArticle.id)} className="flex-grow bg-brand-cyan text-brand-obsidian py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-brand-cyan/30 hover:bg-brand-purple hover:text-white transition-all">
+                   Publicar Imediatamente
                 </button>
               </div>
             </div>

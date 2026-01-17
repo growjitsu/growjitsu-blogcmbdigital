@@ -6,6 +6,7 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJ
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export default async function handler(req: any, res: any) {
+  if (res.headersSent) return;
   res.setHeader('Content-Type', 'application/json');
 
   try {
@@ -18,8 +19,12 @@ export default async function handler(req: any, res: any) {
           .select('*')
           .eq('slug', slug)
           .single();
-        if (error) return res.status(404).json({ success: false, error: 'Post não encontrado' });
-        return res.status(200).json({ success: true, article: data });
+        if (error) {
+          res.status(404).json({ success: false, error: 'Post não encontrado' });
+          return;
+        }
+        res.status(200).json({ success: true, article: data });
+        return;
       }
 
       let query = supabase.from('posts').select('*');
@@ -27,12 +32,16 @@ export default async function handler(req: any, res: any) {
       
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-      return res.status(200).json({ success: true, articles: data });
+      res.status(200).json({ success: true, articles: data });
+      return;
     }
 
     if (req.method === 'POST') {
       const article = req.body;
-      if (!article.id || !article.slug) return res.status(400).json({ success: false, error: 'Dados incompletos' });
+      if (!article.id || !article.slug) {
+        res.status(400).json({ success: false, error: 'Dados incompletos' });
+        return;
+      }
 
       // Sincronização segura via Upsert
       const { data, error } = await supabase
@@ -55,22 +64,29 @@ export default async function handler(req: any, res: any) {
         }, { onConflict: 'id' });
 
       if (error) throw error;
-      return res.status(200).json({ success: true, message: 'Dados persistidos com sucesso na nuvem.' });
+      res.status(200).json({ success: true, message: 'Dados persistidos com sucesso na nuvem.' });
+      return;
     }
 
     if (req.method === 'DELETE') {
       const { id } = req.query;
-      if (!id) return res.status(400).json({ success: false, error: 'ID necessário para exclusão' });
+      if (!id) {
+        res.status(400).json({ success: false, error: 'ID necessário para exclusão' });
+        return;
+      }
 
       const { error } = await supabase.from('posts').delete().eq('id', id);
       if (error) throw error;
-      return res.status(200).json({ success: true, message: 'Registro removido permanentemente.' });
+      res.status(200).json({ success: true, message: 'Registro removido permanentemente.' });
+      return;
     }
 
-    return res.status(405).json({ success: false, error: 'Método não permitido' });
+    res.status(405).json({ success: false, error: 'Método não permitido' });
+    return;
 
   } catch (error: any) {
     console.error("Posts API Error:", error.message);
-    return res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+    return;
   }
 }
