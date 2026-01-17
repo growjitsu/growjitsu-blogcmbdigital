@@ -40,7 +40,7 @@ export default async function handler(req: any, res: any) {
         ? `Gere 2 artigos estratégicos e completos sobre: ${themes.join(", ")}.` 
         : "Gere 2 artigos épicos sobre Inteligência Artificial e Marketing de Performance para 2025.",
       config: {
-        systemInstruction: "Você é o Editor-Chefe da CMBDIGITAL. Retorne estritamente um JSON. Use pt-BR e HTML semântico.",
+        systemInstruction: "Você é o Editor-Chefe da CMBDIGITAL. Retorne estritamente um JSON. Use pt-BR e HTML semântico. Gere slugs únicos.",
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -73,16 +73,15 @@ export default async function handler(req: any, res: any) {
     if (!aiText) throw new Error("A IA não retornou dados.");
 
     const parsedData = JSON.parse(aiText);
-    if (!parsedData || !parsedData.articles) throw new Error("Formato de rascunhos inválido.");
-
     const rawArticles = parsedData.articles;
+
     const articlesToInsert = await Promise.all(rawArticles.map(async (art: any) => {
       let imageUrl = `https://images.unsplash.com/featured/?${encodeURIComponent(art.category + ",technology")}`;
       
       try {
         const imageRes = await ai.models.generateContent({
           model: 'gemini-2.5-flash-image',
-          contents: { parts: [{ text: art.promptImagem + " cinematic photography, professional high-end look" }] },
+          contents: { parts: [{ text: art.promptImagem + " cinematic photography, professional high-end look, futuristic" }] },
           config: { imageConfig: { aspectRatio: "16:9" } }
         });
 
@@ -98,7 +97,7 @@ export default async function handler(req: any, res: any) {
       } catch (e) { /* fallback image used */ }
 
       return {
-        id: `cmb-${Math.random().toString(36).substr(2, 9)}`,
+        // Omitimos o ID para que o Supabase use o DEFAULT gen_random_uuid()
         slug: art.slug,
         title: art.title,
         excerpt: art.excerpt,
@@ -108,7 +107,7 @@ export default async function handler(req: any, res: any) {
         date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }),
         image_url: imageUrl,
         tags: art.tags,
-        status: 'pending', // SALVAR COMO PENDING CONFORME ORIENTAÇÃO
+        status: 'pending',
         meta_title: art.metaTitle || art.title,
         meta_description: art.metaDescription || art.excerpt,
         created_at: new Date().toISOString()
@@ -130,8 +129,6 @@ export default async function handler(req: any, res: any) {
 
   } catch (error: any) {
     console.error("CURADORIA_ERROR:", error.message);
-    if (!res.headersSent) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
+    return res.status(500).json({ success: false, error: error.message });
   }
 }
